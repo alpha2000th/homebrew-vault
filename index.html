@@ -1,0 +1,3030 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Homebrew Vault</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script type="importmap">
+{
+  "imports": {
+    "react": "https://esm.sh/react@18",
+    "react-dom/client": "https://esm.sh/react-dom@18/client",
+    "lucide-react": "https://esm.sh/lucide-react@0.469.0?deps=react@18"
+  }
+}
+</script>
+<script src="https://unpkg.com/@babel/standalone@7/babel.min.js"></script>
+<style>
+  html, body { background: #09090b; margin: 0; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel" data-type="module" data-presets="react">
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import ReactDOM from 'react-dom/client';
+import {
+  Plus, Minus, Trash2, Copy, Download, Upload, Search, X, ChevronDown, ChevronRight,
+  Shield, Heart, Zap, Footprints, Target, Sparkles, Swords, Package, BookOpen,
+  Grid3x3, List, HelpCircle, Tag as TagIcon, Filter,
+  Skull, CheckCircle2, Circle, Layers,
+  FolderOpen, User, Crown, Flame, Ghost, PlayCircle,
+  PenSquare, Compass, Waves, Printer, ImagePlus, Wand2, ClipboardPaste, Star
+} from 'lucide-react';
+
+// ============================================================
+// CONSTANTS
+// ============================================================
+
+const ABILITIES = ['str', 'dex', 'con', 'int', 'wis', 'cha'];
+const ABILITY_LABELS = { str: 'STR', dex: 'DEX', con: 'CON', int: 'INT', wis: 'WIS', cha: 'CHA' };
+const SKILLS = [
+  { key: 'acrobatics', label: 'Acrobatics', ability: 'dex' },
+  { key: 'animalHandling', label: 'Animal Handling', ability: 'wis' },
+  { key: 'arcana', label: 'Arcana', ability: 'int' },
+  { key: 'athletics', label: 'Athletics', ability: 'str' },
+  { key: 'deception', label: 'Deception', ability: 'cha' },
+  { key: 'history', label: 'History', ability: 'int' },
+  { key: 'insight', label: 'Insight', ability: 'wis' },
+  { key: 'intimidation', label: 'Intimidation', ability: 'cha' },
+  { key: 'investigation', label: 'Investigation', ability: 'int' },
+  { key: 'medicine', label: 'Medicine', ability: 'wis' },
+  { key: 'nature', label: 'Nature', ability: 'int' },
+  { key: 'perception', label: 'Perception', ability: 'wis' },
+  { key: 'performance', label: 'Performance', ability: 'cha' },
+  { key: 'persuasion', label: 'Persuasion', ability: 'cha' },
+  { key: 'religion', label: 'Religion', ability: 'int' },
+  { key: 'sleightOfHand', label: 'Sleight of Hand', ability: 'dex' },
+  { key: 'stealth', label: 'Stealth', ability: 'dex' },
+  { key: 'survival', label: 'Survival', ability: 'wis' },
+];
+const DAMAGE_TYPES = ['Acid', 'Bludgeoning', 'Cold', 'Fire', 'Force', 'Lightning', 'Necrotic', 'Piercing', 'Poison', 'Psychic', 'Radiant', 'Slashing', 'Thunder'];
+const CONDITIONS = ['Blinded', 'Charmed', 'Concentrating', 'Deafened', 'Exhaustion', 'Frightened', 'Grappled', 'Incapacitated', 'Invisible', 'Paralyzed', 'Petrified', 'Poisoned', 'Prone', 'Restrained', 'Stunned', 'Unconscious'];
+const RARITIES = ['Common', 'Uncommon', 'Rare', 'Very Rare', 'Legendary', 'Artifact'];
+const ACTION_CATEGORIES = ['action', 'bonus', 'reaction', 'legendary', 'lair'];
+const ACTION_CATEGORY_LABELS = { action: 'Actions', bonus: 'Bonus Actions', reaction: 'Reactions', legendary: 'Legendary Actions', lair: 'Lair Actions' };
+
+const ICON_MAP = { User, Crown, Skull, Ghost, Flame, Sparkles, Swords, Shield, Compass, Waves };
+const ICON_NAMES = Object.keys(ICON_MAP);
+
+const STORAGE_KEY = 'homebrew-vault-data-v1';
+const LAST_OPEN_KEY = 'homebrew-vault-last-open-v1';
+const SCHEMA_VERSION = 1;
+
+const SCHEMA_SNIPPET = `{
+  // Only "name" is required — every other field is optional and will be
+  // filled with a sensible default if omitted. "id" fields throughout are
+  // optional; the app assigns fresh ones on import, so it's fine to omit
+  // them entirely or reuse simple placeholders like "a1", "r1".
+
+  "name": "Kravax the Ember Sovereign",       // REQUIRED, string
+  "subtitle": "Level 12 Eldritch Sovereign",   // string, shown under the name
+  "role": "Boss NPC",                          // string, free text (class/level/monster role)
+  "icon": "Crown",                             // one of: User, Crown, Skull, Ghost, Flame, Sparkles, Swords, Shield, Compass, Waves
+  "portraitUrl": "",                           // leave empty string — portraits are uploaded by the user, not set via JSON
+  "tags": ["Faction: Obsidian Order", "Status: Boss"],  // free-text strings, "Label: Value" is a convention, not enforced
+
+  "hp": { "current": 140, "max": 140, "temp": 0 },
+  "ac": 18,
+  "speed": "30 ft, fly 60 ft",                 // free text, not just a number, to allow multiple movement types
+  "initiativeMod": 4,
+  "proficiencyBonus": 4,
+
+  "abilities": { "str": 20, "dex": 18, "con": 22, "int": 14, "wis": 16, "cha": 20 },
+  "saveProficiencies": ["con", "wis"],          // subset of: str, dex, con, int, wis, cha
+  "skillProficiencies": ["perception", "arcana"], // subset of the standard 5e skill list, camelCase keys, e.g. "animalHandling", "sleightOfHand"
+  "skillExpertise": ["perception"],             // subset of skillProficiencies — doubles the proficiency bonus on that skill (5e "Expertise")
+  "skillOverrides": { "arcana": 15 },           // optional: hardcode a skill's total bonus instead of computing it from ability + proficiency
+  "customStats": [{ "label": "Legend Points", "value": "3" }],  // arbitrary extra stat tiles; "value" is a free-text string so it can hold dice, text, or numbers
+
+  "conditions": ["Concentrating"],             // standard 5e conditions, or any custom string
+  "vulnerabilities": ["Cold"],                  // damage type strings
+  "resistances": ["Fire", "Necrotic"],
+  "immunities": ["Poison"],
+  "conditionImmunities": ["Frightened"],
+
+  "senses": { "passivePerception": 18, "darkvision": 120, "customSenses": ["Tremorsense 60 ft", "Blindsight 30 ft"] },
+
+  "actions": [
+    // "category" must be one of: action, bonus, reaction, legendary, lair
+    { "category": "action", "name": "Ember Lash", "cost": "", "description": "+9 to hit, 2d8+5 fire damage." },
+    { "category": "legendary", "name": "Detect", "cost": "Costs 1 Legendary Action", "description": "Makes a Wisdom (Perception) check." }
+  ],
+  "legendaryActionsPerRound": 3,                // 0 if the character has none; the UI hides the tracker when 0
+
+  "resourcePools": [
+    // "rechargeType" must be one of: manual, round, shortRest, longRest, diceRoll
+    //   manual     — no automatic refill, the player tracks it by hand
+    //   round      — refills every combat round (rare; use the "Next Round" button)
+    //   shortRest  / longRest — refills on the corresponding rest (tracked by the player, not automated)
+    //   diceRoll   — a "Recharge X-Y" style ability (e.g. breath weapons); roll rechargeDie,
+    //                and it recharges on a result >= rechargeThreshold
+    { "name": "Spell Slots (5th Level)", "current": 2, "max": 2, "rechargeType": "longRest" },
+    { "name": "Fire Breath", "current": 1, "max": 1, "rechargeType": "diceRoll", "rechargeDie": 6, "rechargeThreshold": 5 }
+  ],
+
+  "items": [
+    // "rarity" must be one of: Common, Uncommon, Rare, Very Rare, Legendary, Artifact
+    // "abilities" is optional — use it when an item has multiple distinct
+    // powers or passive traits (common for late-game artifacts); each one
+    // gets its own name, usage limit, and description. Skip it entirely
+    // for simple items that only need the top-level "description".
+    {
+      "name": "Ring of Ember Binding", "attunement": true, "rarity": "Rare", "usage": "1/Day",
+      "description": "A band of blackened iron that radiates heat.",
+      "abilities": [
+        { "name": "Fire Resistance", "usage": "Passive", "description": "You have resistance to fire damage while wearing this ring." },
+        { "name": "Ember Burst", "usage": "1/Day", "description": "As an action, unleash a 15-ft cone of fire, 6d6 damage, DC 15 DEX save for half." }
+      ]
+    }
+  ],
+
+  "homebrewPowers": [
+    { "name": "Sovereign Wrath", "activationCost": "1 Action", "range": "60 ft, single target", "saveDC": "17 (DEX)", "formula": "6d10 fire", "description": "A blast of ember energy erupts from the sovereign's outstretched hand." }
+  ],
+
+  "customFields": [{ "label": "Bond", "value": "Sworn to the Obsidian Order" }],  // simple key-value pairs
+  "customTabs": [
+    // Each custom tab becomes its own top-level tab in the app, and can
+    // hold as many separate "entries" as you want (each with a title and
+    // free text) — good for splitting lore, bonds, and faction notes into
+    // separate pieces within one category instead of one giant block.
+    {
+      "name": "Lore & Bonds",
+      "entries": [
+        { "title": "Origins", "content": "Freeform text about where the character came from." },
+        { "title": "Sworn Bond", "content": "Freeform text about an oath, promise, or tie to another character." }
+      ]
+    }
+  ]
+}`;
+
+// A ready-to-paste prompt for generating a character with any AI assistant.
+// Combines the schema with explicit output instructions so the AI's reply
+// can be saved straight to a .json file and dropped into the Import modal
+// with no manual cleanup.
+const AI_FILL_PROMPT = `Generate a D&D 5e (or homebrew) character/creature as a single JSON object matching the schema below. Respond with ONLY the JSON object — no markdown code fences, no commentary before or after, no // comments (the schema below uses them only to explain each field to you). Only "name" is required; omit any field you don't have a good value for rather than guessing badly, and the app will fill in a sensible default.
+
+Here is the character I want: [DESCRIBE THE CHARACTER/CREATURE HERE — e.g. "a level 9 tiefling warlock NPC who serves a fire-themed crime boss, with 2-3 signature spells written up as homebrew powers"]
+
+Schema reference:
+${SCHEMA_SNIPPET}`;
+
+// ============================================================
+// UTILITIES
+// ============================================================
+
+const uid = () => Math.random().toString(36).slice(2) + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+const abilityMod = (score) => Math.floor((Number(score) - 10) / 2);
+const fmtMod = (n) => (n >= 0 ? `+${n}` : `${n}`);
+const clamp = (n, min, max) => Math.max(min, Math.min(max, n));
+
+// 5e-standard HP application: damage hits temp HP first, then current HP.
+// Healing restores current HP up to max and never touches/creates temp HP.
+function applyHpDelta(hp, amount) {
+  if (amount === 0 || !amount) return hp;
+  if (amount < 0) {
+    let dmg = -amount;
+    const temp = hp.temp || 0;
+    const tempAfter = Math.max(0, temp - dmg);
+    const dmgLeftover = Math.max(0, dmg - temp);
+    const current = clamp(hp.current - dmgLeftover, 0, hp.max);
+    return { ...hp, current, temp: tempAfter };
+  }
+  const current = clamp(hp.current + amount, 0, hp.max);
+  return { ...hp, current };
+}
+
+// Deep-clones a character and regenerates every nested id so duplicates
+// never collide with the original (actions, items, powers, resource pools,
+// custom fields/tabs, custom stats all get fresh ids).
+function cloneCharacterWithFreshIds(character) {
+  const clone = JSON.parse(JSON.stringify(character));
+  const idArrayKeys = ['actions', 'resourcePools', 'items', 'homebrewPowers', 'customFields', 'customTabs', 'customStats'];
+  idArrayKeys.forEach((key) => {
+    if (Array.isArray(clone[key])) {
+      clone[key] = clone[key].map((item) => ({ ...item, id: uid() }));
+    }
+  });
+  clone.id = uid();
+  clone.lastEdited = Date.now();
+  return clone;
+}
+
+const isPlainObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
+const asString = (v, fallback = '') => (typeof v === 'string' ? v : fallback);
+const asNumber = (v, fallback = 0) => (typeof v === 'number' && !Number.isNaN(v) ? v : fallback);
+const asBool = (v, fallback = false) => (typeof v === 'boolean' ? v : fallback);
+const asStringArray = (v) => (Array.isArray(v) ? v.filter((x) => typeof x === 'string') : []);
+
+// Normalizes a raw imported object (hand-written or AI-generated) into a
+// valid character shape. Every field is individually type-checked and
+// coerced to a safe default rather than trusting the input's shape — this
+// is what makes AI-generated JSON safe to import even when a field is
+// missing, misnamed, or the wrong type (a string HP instead of an object,
+// actions given as plain strings, etc.).
+function normalizeImportedCharacter(raw) {
+  const blank = createBlankCharacter();
+  if (!isPlainObject(raw)) return blank;
+
+  const abilities = { ...blank.abilities };
+  if (isPlainObject(raw.abilities)) {
+    ABILITIES.forEach((ab) => { abilities[ab] = asNumber(raw.abilities[ab], 10); });
+  }
+
+  const hp = { ...blank.hp };
+  if (isPlainObject(raw.hp)) {
+    hp.max = Math.max(1, asNumber(raw.hp.max, 10));
+    hp.current = clamp(asNumber(raw.hp.current, hp.max), 0, hp.max);
+    hp.temp = Math.max(0, asNumber(raw.hp.temp, 0));
+  }
+
+  const normalizeIdArray = (arr, shapeFn) =>
+    Array.isArray(arr) ? arr.filter(isPlainObject).map((item) => ({ id: uid(), ...shapeFn(item) })) : [];
+
+  const senses = { ...blank.senses };
+  if (isPlainObject(raw.senses)) {
+    senses.passivePerception = asNumber(raw.senses.passivePerception, 10);
+    senses.darkvision = asNumber(raw.senses.darkvision, 0);
+    senses.custom = '';
+    // Accept customSenses as either objects [{name: "..."}] or a bare array
+    // of strings (an AI is likely to produce the simpler shape) — both
+    // normalize to the same internal list.
+    if (Array.isArray(raw.senses.customSenses)) {
+      senses.customSenses = raw.senses.customSenses
+        .map((s) => (typeof s === 'string' ? { name: s } : isPlainObject(s) ? { name: asString(s.name) } : null))
+        .filter((s) => s && s.name)
+        .map((s) => ({ id: uid(), ...s }));
+    } else if (asString(raw.senses.custom)) {
+      senses.customSenses = [{ id: uid(), name: raw.senses.custom }];
+    }
+  }
+
+  return {
+    ...blank,
+    id: uid(),
+    name: asString(raw.name, blank.name) || blank.name,
+    subtitle: asString(raw.subtitle),
+    role: asString(raw.role),
+    icon: ICON_NAMES.includes(raw.icon) ? raw.icon : blank.icon,
+    portraitUrl: '', // never imported from JSON — portraits are uploaded, not scripted
+    tags: asStringArray(raw.tags),
+    lastEdited: Date.now(),
+    hp,
+    ac: asNumber(raw.ac, blank.ac),
+    speed: asString(raw.speed, blank.speed),
+    initiativeMod: asNumber(raw.initiativeMod, 0),
+    proficiencyBonus: asNumber(raw.proficiencyBonus, 2),
+    abilities,
+    saveProficiencies: asStringArray(raw.saveProficiencies).filter((a) => ABILITIES.includes(a)),
+    skillProficiencies: asStringArray(raw.skillProficiencies).filter((s) => SKILLS.some((sk) => sk.key === s)),
+    skillExpertise: (() => {
+      const profs = new Set(asStringArray(raw.skillProficiencies).filter((s) => SKILLS.some((sk) => sk.key === s)));
+      return asStringArray(raw.skillExpertise).filter((s) => SKILLS.some((sk) => sk.key === s) && profs.has(s));
+    })(),
+    skillOverrides: isPlainObject(raw.skillOverrides)
+      ? Object.fromEntries(
+          Object.entries(raw.skillOverrides)
+            .filter(([key, v]) => SKILLS.some((sk) => sk.key === key) && typeof v === 'number' && !Number.isNaN(v))
+        )
+      : {},
+    customStats: normalizeIdArray(raw.customStats, (s) => ({ label: asString(s.label, 'Stat'), value: asString(s.value, String(s.value ?? '')) })),
+    conditions: asStringArray(raw.conditions),
+    vulnerabilities: asStringArray(raw.vulnerabilities),
+    resistances: asStringArray(raw.resistances),
+    immunities: asStringArray(raw.immunities),
+    conditionImmunities: asStringArray(raw.conditionImmunities),
+    senses,
+    actions: normalizeIdArray(raw.actions, (a) => ({
+      category: ACTION_CATEGORIES.includes(a.category) ? a.category : 'action',
+      name: asString(a.name, 'Action'),
+      cost: asString(a.cost),
+      description: asString(a.description),
+    })),
+    legendaryActionsPerRound: Math.max(0, asNumber(raw.legendaryActionsPerRound, 0)),
+    legendaryActionsUsed: 0,
+    resourcePools: normalizeIdArray(raw.resourcePools, (p) => {
+      const max = Math.max(0, asNumber(p.max, 1));
+      const validRechargeTypes = ['manual', 'round', 'shortRest', 'longRest', 'diceRoll'];
+      let rechargeType = validRechargeTypes.includes(p.rechargeType) ? p.rechargeType : null;
+      if (!rechargeType) {
+        // Back-compat: older schema only had a boolean "resets each round" flag.
+        rechargeType = asBool(p.resetsEachRound, false) ? 'round' : 'manual';
+      }
+      return {
+        name: asString(p.name, 'Resource'),
+        max,
+        current: clamp(asNumber(p.current, max), 0, max),
+        rechargeType,
+        rechargeDie: Math.max(2, asNumber(p.rechargeDie, 6)),
+        rechargeThreshold: Math.max(1, asNumber(p.rechargeThreshold, 5)),
+      };
+    }),
+    items: normalizeIdArray(raw.items, (i) => ({
+      name: asString(i.name, 'Item'),
+      attunement: asBool(i.attunement, false),
+      rarity: RARITIES.includes(i.rarity) ? i.rarity : 'Common',
+      usage: asString(i.usage),
+      description: asString(i.description),
+      abilities: normalizeIdArray(i.abilities, (a) => ({
+        name: asString(a.name, 'Ability'),
+        usage: asString(a.usage),
+        description: asString(a.description),
+      })),
+    })),
+    homebrewPowers: normalizeIdArray(raw.homebrewPowers, (p) => ({
+      name: asString(p.name, 'Power'),
+      activationCost: asString(p.activationCost),
+      range: asString(p.range),
+      saveDC: asString(p.saveDC),
+      formula: asString(p.formula),
+      description: asString(p.description),
+    })),
+    customFields: normalizeIdArray(raw.customFields, (f) => ({ label: asString(f.label, 'Field'), value: asString(f.value, String(f.value ?? '')) })),
+    customTabs: normalizeIdArray(raw.customTabs, (t) => {
+      let entries = [];
+      if (Array.isArray(t.entries)) {
+        entries = t.entries
+          .filter(isPlainObject)
+          .map((e) => ({ id: uid(), title: asString(e.title, 'Entry'), content: asString(e.content) }));
+      } else if (asString(t.content)) {
+        // Accept the simpler single-content shape too (an AI is likely to
+        // produce this) and fold it into one entry.
+        entries = [{ id: uid(), title: asString(t.name, 'Notes'), content: asString(t.content) }];
+      }
+      return { name: asString(t.name, 'Tab'), content: '', entries };
+    }),
+  };
+}
+
+const createBlankCharacter = () => ({
+  id: uid(),
+  name: 'New Character',
+  subtitle: '',
+  icon: 'User',
+  portraitUrl: '',
+  role: '',
+  tags: [],
+  lastEdited: Date.now(),
+  hp: { current: 10, max: 10, temp: 0 },
+  ac: 10,
+  speed: '30 ft',
+  initiativeMod: 0,
+  proficiencyBonus: 2,
+  abilities: { str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10 },
+  saveProficiencies: [],
+  skillProficiencies: [],
+  skillExpertise: [],
+  skillOverrides: {},
+  customStats: [],
+  conditions: [],
+  vulnerabilities: [],
+  resistances: [],
+  immunities: [],
+  conditionImmunities: [],
+  senses: { passivePerception: 10, darkvision: 0, custom: '', customSenses: [] },
+  actions: [],
+  legendaryActionsPerRound: 0,
+  legendaryActionsUsed: 0,
+  resourcePools: [],
+  items: [],
+  homebrewPowers: [],
+  customFields: [],
+  customTabs: [],
+});
+
+function loadVault() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : [];
+    }
+  } catch (e) { /* corrupt or unavailable storage */ }
+  return [];
+}
+
+// Returns { ok: true } on success or { ok: false, error } so callers can
+// surface storage failures (quota exceeded, storage disabled, etc.) instead
+// of silently losing data.
+function saveVault(characters) {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(characters));
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e };
+  }
+}
+
+function downloadJson(data, filename) {
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+// ============================================================
+// REUSABLE UI PRIMITIVES
+// ============================================================
+
+function IconRenderer({ name, className }) {
+  const Cmp = ICON_MAP[name] || User;
+  return <Cmp className={className} />;
+}
+
+// Renders the character's uploaded portrait if present, otherwise falls
+// back to their chosen icon glyph.
+function Avatar({ character, className = '', iconClassName = 'w-5 h-5 text-emerald-400' }) {
+  if (character.portraitUrl) {
+    return <img src={character.portraitUrl} alt={character.name} className={`object-cover ${className}`} />;
+  }
+  return (
+    <div className={`flex items-center justify-center ${className}`}>
+      <IconRenderer name={character.icon} className={iconClassName} />
+    </div>
+  );
+}
+
+const MAX_PORTRAIT_DIMENSION = 512; // px, keeps localStorage usage reasonable
+const MAX_PORTRAIT_SOURCE_BYTES = 15 * 1024 * 1024; // 15MB guard before we even try to process a file
+
+// Downscales an uploaded image client-side (canvas) and returns a JPEG data
+// URL. Portraits are stored inline as base64 since there's no file storage
+// available, so keeping them small matters for both load time and the
+// localStorage quota.
+function downscaleImageFile(file) {
+  return new Promise((resolve, reject) => {
+    if (file.size > MAX_PORTRAIT_SOURCE_BYTES) {
+      reject(new Error('Image is too large (max 15MB).'));
+      return;
+    }
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('Could not read the file.'));
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error('Could not decode image.'));
+      img.onload = () => {
+        const scale = Math.min(1, MAX_PORTRAIT_DIMENSION / Math.max(img.width, img.height));
+        const w = Math.round(img.width * scale);
+        const h = Math.round(img.height * scale);
+        const canvas = document.createElement('canvas');
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, w, h);
+        resolve(canvas.toDataURL('image/jpeg', 0.85));
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+function AvatarUpload({ character, onChange, editMode }) {
+  const fileRef = useRef(null);
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [showIconPicker, setShowIconPicker] = useState(false);
+
+  const handleFile = async (file) => {
+    if (!file.type.startsWith('image/')) {
+      setError('Please choose an image file.');
+      return;
+    }
+    setError('');
+    setBusy(true);
+    try {
+      const dataUrl = await downscaleImageFile(file);
+      onChange({ portraitUrl: dataUrl });
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (!editMode) {
+    return <Avatar character={character} className="w-11 h-11 rounded-lg bg-gradient-to-br from-zinc-800 to-zinc-900 border border-zinc-700 shrink-0" />;
+  }
+
+  return (
+    <div className="relative shrink-0 group">
+      <button
+        onClick={() => fileRef.current?.click()}
+        title="Upload portrait"
+        className="w-11 h-11 rounded-lg bg-gradient-to-br from-zinc-800 to-zinc-900 border border-zinc-700 flex items-center justify-center overflow-hidden relative"
+      >
+        <Avatar character={character} className="w-11 h-11 rounded-lg" />
+        <div className="absolute inset-0 bg-black/0 group-hover:bg-black/50 flex items-center justify-center transition-colors">
+          <ImagePlus className="w-4 h-4 text-white opacity-0 group-hover:opacity-100 transition-opacity" />
+        </div>
+      </button>
+      {character.portraitUrl ? (
+        <button
+          onClick={() => onChange({ portraitUrl: '' })}
+          title="Remove portrait"
+          className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-red-600 hover:bg-red-500 flex items-center justify-center"
+        >
+          <X className="w-2.5 h-2.5 text-white" />
+        </button>
+      ) : (
+        <button
+          onClick={() => setShowIconPicker(!showIconPicker)}
+          title="Choose fallback icon"
+          className="absolute -bottom-1.5 -right-1.5 w-4 h-4 rounded-full bg-zinc-700 hover:bg-zinc-600 border border-zinc-600 flex items-center justify-center"
+        >
+          <ChevronDown className="w-2.5 h-2.5 text-zinc-300" />
+        </button>
+      )}
+      <input
+        ref={fileRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={(e) => e.target.files[0] && handleFile(e.target.files[0])}
+      />
+      {busy && <div className="absolute -bottom-5 left-0 text-[9px] text-zinc-500 whitespace-nowrap">Processing…</div>}
+      {error && <div className="absolute -bottom-5 left-0 text-[9px] text-red-400 whitespace-nowrap">{error}</div>}
+      {showIconPicker && (
+        <div className="absolute top-full mt-2 left-0 z-40 bg-zinc-800 border border-zinc-700 rounded-lg p-2 grid grid-cols-5 gap-1 shadow-xl">
+          {ICON_NAMES.map((name) => (
+            <button
+              key={name}
+              onClick={() => { onChange({ icon: name }); setShowIconPicker(false); }}
+              className={`w-7 h-7 rounded flex items-center justify-center hover:bg-zinc-700 ${character.icon === name ? 'bg-emerald-900 ring-1 ring-emerald-500' : ''}`}
+            >
+              <IconRenderer name={name} className="w-4 h-4 text-zinc-300" />
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Badge({ children, color = 'zinc', onRemove, active, onClick, size = 'sm' }) {
+  const colors = {
+    zinc: 'bg-zinc-800 text-zinc-300 border-zinc-700',
+    emerald: 'bg-emerald-950 text-emerald-400 border-emerald-800',
+    violet: 'bg-violet-950 text-violet-400 border-violet-800',
+    amber: 'bg-amber-950 text-amber-400 border-amber-800',
+    red: 'bg-red-950 text-red-400 border-red-800',
+    sky: 'bg-sky-950 text-sky-400 border-sky-800',
+  };
+  const activeColors = {
+    zinc: 'bg-zinc-700 text-white border-zinc-500',
+    emerald: 'bg-emerald-600 text-white border-emerald-400',
+    violet: 'bg-violet-600 text-white border-violet-400',
+    amber: 'bg-amber-600 text-white border-amber-400',
+    red: 'bg-red-600 text-white border-red-400',
+    sky: 'bg-sky-600 text-white border-sky-400',
+  };
+  const sizeCls = size === 'xs' ? 'text-[10px] px-1.5 py-0.5' : 'text-xs px-2 py-1';
+  return (
+    <span
+      onClick={onClick}
+      className={`inline-flex items-center gap-1 rounded-md border font-medium whitespace-nowrap ${sizeCls} ${active ? activeColors[color] : colors[color]} ${onClick ? 'cursor-pointer select-none' : ''}`}
+    >
+      {children}
+      {onRemove && (
+        <button onClick={(e) => { e.stopPropagation(); onRemove(); }} className="hover:text-white ml-0.5">
+          <X className="w-3 h-3" />
+        </button>
+      )}
+    </span>
+  );
+}
+
+function Card({ children, className = '' }) {
+  return (
+    <div className={`bg-zinc-900 border border-zinc-800 rounded-lg ${className}`}>
+      {children}
+    </div>
+  );
+}
+
+function SectionHeader({ icon: Icon, title, accent = 'zinc-400', right }) {
+  return (
+    <div className="flex items-center justify-between mb-3">
+      <div className="flex items-center gap-2">
+        {Icon && <Icon className={`w-4 h-4 text-${accent}`} />}
+        <h3 className="text-sm font-semibold text-zinc-200 tracking-wide uppercase">{title}</h3>
+      </div>
+      {right}
+    </div>
+  );
+}
+
+function NumberField({ label, value, onChange, editMode, min, className = '', mono = true }) {
+  return (
+    <div className={className}>
+      {label && <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-0.5">{label}</div>}
+      {editMode ? (
+        <input
+          type="number"
+          value={value}
+          min={min}
+          onChange={(e) => onChange(min !== undefined ? Math.max(min, Number(e.target.value)) : Number(e.target.value))}
+          className={`w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-zinc-100 focus:outline-none focus:ring-1 focus:ring-emerald-500 ${mono ? 'font-mono' : ''}`}
+        />
+      ) : (
+        <div className={`text-zinc-100 ${mono ? 'font-mono' : ''}`}>{value}</div>
+      )}
+    </div>
+  );
+}
+
+function TextField({ label, value, onChange, editMode, placeholder = '', className = '' }) {
+  return (
+    <div className={className}>
+      {label && <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-0.5">{label}</div>}
+      {editMode ? (
+        <input
+          type="text"
+          value={value || ''}
+          placeholder={placeholder}
+          onChange={(e) => onChange(e.target.value)}
+          className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-zinc-100 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+        />
+      ) : (
+        <div className="text-zinc-100">{value || <span className="text-zinc-600 italic">—</span>}</div>
+      )}
+    </div>
+  );
+}
+
+const TEXTAREA_SOFT_LIMIT = 20000; // characters — well beyond any reasonable description, just a sanity backstop
+
+function TextArea({ value, onChange, editMode, placeholder = '', rows = 3 }) {
+  const taRef = useRef(null);
+
+  // Auto-grow the textarea to fit its content (up to a max height, after
+  // which it scrolls internally) so pasting a long paragraph doesn't leave
+  // the user stuck dragging a resize handle to see what they typed.
+  useEffect(() => {
+    if (taRef.current) {
+      taRef.current.style.height = 'auto';
+      taRef.current.style.height = `${Math.min(taRef.current.scrollHeight, 480)}px`;
+    }
+  }, [value, editMode]);
+
+  if (editMode) {
+    const len = (value || '').length;
+    return (
+      <div>
+        <textarea
+          ref={taRef}
+          value={value || ''}
+          placeholder={placeholder}
+          rows={rows}
+          onChange={(e) => onChange(e.target.value)}
+          className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1.5 text-sm text-zinc-100 focus:outline-none focus:ring-1 focus:ring-emerald-500 resize-y overflow-y-auto"
+          style={{ minHeight: `${rows * 1.5}rem`, maxHeight: '480px' }}
+        />
+        {len > TEXTAREA_SOFT_LIMIT && (
+          <div className="text-[10px] text-amber-500 mt-0.5">
+            That's {len.toLocaleString()} characters — very long entries can slow saving and take up more storage.
+          </div>
+        )}
+      </div>
+    );
+  }
+  return (
+    <div className="text-sm text-zinc-300 whitespace-pre-wrap leading-relaxed max-h-[480px] overflow-y-auto">
+      {value || <span className="text-zinc-600 italic">No description.</span>}
+    </div>
+  );
+}
+
+function TagInput({ tags, onAdd, onRemove, placeholder = 'Add tag…', color = 'zinc' }) {
+  const [val, setVal] = useState('');
+  const submit = () => {
+    const v = val.trim();
+    if (v && !tags.includes(v)) onAdd(v);
+    setVal('');
+  };
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      {tags.map((t) => (
+        <Badge key={t} color={color} onRemove={() => onRemove(t)}>{t}</Badge>
+      ))}
+      <input
+        value={val}
+        onChange={(e) => setVal(e.target.value)}
+        onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); submit(); } }}
+        onBlur={submit}
+        placeholder={placeholder}
+        className="bg-transparent border-b border-dashed border-zinc-700 text-xs px-1 py-0.5 text-zinc-300 focus:outline-none focus:border-emerald-500 min-w-[100px]"
+      />
+    </div>
+  );
+}
+
+function ChipSelect({ options, selected, onToggle, color = 'zinc' }) {
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {options.map((opt) => (
+        <Badge key={opt} color={color} active={selected.includes(opt)} onClick={() => onToggle(opt)} size="xs">
+          {opt}
+        </Badge>
+      ))}
+    </div>
+  );
+}
+
+function Collapsible({ title, children, defaultOpen = true, right, badge }) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <Card className="overflow-hidden">
+      <button
+        onClick={() => setOpen(!open)}
+        className="w-full flex items-center justify-between px-3 py-2.5 hover:bg-zinc-800/50 transition-colors"
+      >
+        <div className="flex items-center gap-2">
+          {open ? <ChevronDown className="w-4 h-4 text-zinc-500" /> : <ChevronRight className="w-4 h-4 text-zinc-500" />}
+          <span className="text-sm font-medium text-zinc-200">{title}</span>
+          {badge}
+        </div>
+        {right}
+      </button>
+      {open && <div className="px-3 pb-3 border-t border-zinc-800 pt-3">{children}</div>}
+    </Card>
+  );
+}
+
+function Modal({ title, onClose, children, wide = false }) {
+  return (
+    <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={onClose}>
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className={`bg-zinc-900 border border-zinc-700 rounded-xl shadow-2xl w-full ${wide ? 'max-w-3xl' : 'max-w-lg'} max-h-[85vh] overflow-hidden flex flex-col`}
+      >
+        <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-800">
+          <h2 className="text-base font-semibold text-zinc-100">{title}</h2>
+          <button onClick={onClose} className="text-zinc-500 hover:text-zinc-200">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+        <div className="overflow-y-auto px-5 py-4">{children}</div>
+      </div>
+    </div>
+  );
+}
+
+function IconButton({ icon: Icon, onClick, label, variant = 'ghost', className = '' }) {
+  const variants = {
+    ghost: 'text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800',
+    danger: 'text-red-400 hover:text-red-300 hover:bg-red-950',
+    primary: 'text-emerald-400 hover:text-emerald-300 hover:bg-emerald-950',
+  };
+  return (
+    <button
+      onClick={onClick}
+      title={label}
+      className={`inline-flex items-center gap-1.5 px-2 py-1.5 rounded-md text-xs font-medium transition-colors ${variants[variant]} ${className}`}
+    >
+      <Icon className="w-3.5 h-3.5" />
+      {label && <span>{label}</span>}
+    </button>
+  );
+}
+
+function CopyButton({ text, label, icon: Icon = ClipboardPaste }) {
+  const [copied, setCopied] = useState(false);
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1800);
+    } catch (e) {
+      // Clipboard API unavailable (e.g. insecure context) — fail quietly,
+      // the schema is still visible to select and copy manually.
+    }
+  };
+  return (
+    <button
+      onClick={handleCopy}
+      className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium bg-zinc-800 hover:bg-zinc-700 text-zinc-300 transition-colors"
+    >
+      <Icon className="w-3.5 h-3.5" />
+      {copied ? 'Copied!' : label}
+    </button>
+  );
+}
+
+function UndoToast({ message, onUndo, onDismiss, seconds = 8 }) {
+  const [remaining, setRemaining] = useState(seconds);
+  useEffect(() => {
+    if (remaining <= 0) { onDismiss(); return; }
+    const t = setTimeout(() => setRemaining((r) => r - 1), 1000);
+    return () => clearTimeout(t);
+  }, [remaining, onDismiss]);
+
+  return (
+    <div className="fixed bottom-5 left-1/2 -translate-x-1/2 z-[60] bg-zinc-800 border border-zinc-700 rounded-lg shadow-2xl px-4 py-3 flex items-center gap-4">
+      <span className="text-sm text-zinc-200">{message}</span>
+      <button onClick={onUndo} className="text-sm font-semibold text-emerald-400 hover:text-emerald-300">
+        Undo ({remaining}s)
+      </button>
+      <button onClick={onDismiss} className="text-zinc-500 hover:text-zinc-300">
+        <X className="w-4 h-4" />
+      </button>
+    </div>
+  );
+}
+
+// ============================================================
+// QUICK COMBAT BAR (sticky signature element)
+// ============================================================
+
+function TempHpBadge({ temp, onChange }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(String(temp));
+
+  const commit = () => {
+    onChange(Math.max(0, Number(draft) || 0));
+    setEditing(false);
+  };
+
+  if (editing) {
+    return (
+      <input
+        autoFocus
+        type="number"
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); commit(); } if (e.key === 'Escape') { setDraft(String(temp)); setEditing(false); } }}
+        className="w-12 bg-zinc-800 border border-sky-600 rounded px-1 text-sm text-center text-sky-300 focus:outline-none"
+      />
+    );
+  }
+
+  return (
+    <button
+      onClick={() => { setDraft(String(temp)); setEditing(true); }}
+      title="Click to set temp HP"
+      className={`text-sm transition-colors ${temp > 0 ? 'text-sky-400 hover:text-sky-300' : 'text-zinc-700 hover:text-sky-500'}`}
+    >
+      {temp > 0 ? `+${temp}` : '+temp'}
+    </button>
+  );
+}
+
+function HPTracker({ hp, onChange, editMode, isConcentrating, onConcentrationCheck }) {
+  const [delta, setDelta] = useState('');
+  const [editingCurrent, setEditingCurrent] = useState(false);
+  const [currentDraft, setCurrentDraft] = useState(String(hp.current));
+  const [editingMax, setEditingMax] = useState(false);
+  const [maxDraft, setMaxDraft] = useState(String(hp.max));
+  const pct = hp.max > 0 ? clamp((hp.current / hp.max) * 100, 0, 100) : 0;
+  const barColor = pct > 50 ? 'bg-emerald-500' : pct > 25 ? 'bg-amber-500' : 'bg-red-500';
+
+  const applyDelta = (sign) => {
+    const d = Number(delta);
+    if (!d) return;
+    onChange(applyHpDelta(hp, sign * d));
+    if (sign < 0 && isConcentrating && onConcentrationCheck) {
+      onConcentrationCheck(d);
+    }
+    setDelta('');
+  };
+
+  const commitCurrentEdit = () => {
+    const v = clamp(Number(currentDraft) || 0, 0, hp.max);
+    onChange({ ...hp, current: v });
+    setEditingCurrent(false);
+  };
+
+  const commitMaxEdit = () => {
+    const v = Math.max(1, Number(maxDraft) || 1);
+    onChange({ ...hp, max: v, current: Math.min(hp.current, v) });
+    setEditingMax(false);
+  };
+
+  return (
+    <div className="flex items-center gap-3">
+      <Heart className="w-5 h-5 text-red-400 shrink-0" />
+      <div className="min-w-[140px]">
+        <div className="flex items-baseline gap-1 font-mono">
+          {editingCurrent ? (
+            <input
+              autoFocus
+              type="number"
+              value={currentDraft}
+              onChange={(e) => setCurrentDraft(e.target.value)}
+              onBlur={commitCurrentEdit}
+              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); commitCurrentEdit(); } if (e.key === 'Escape') { setCurrentDraft(String(hp.current)); setEditingCurrent(false); } }}
+              className="w-14 bg-zinc-800 border border-emerald-600 rounded px-1 text-xl font-bold text-zinc-100 text-center focus:outline-none"
+            />
+          ) : (
+            <button
+              onClick={() => { setCurrentDraft(String(hp.current)); setEditingCurrent(true); }}
+              title="Click to set exact current HP"
+              className="text-xl font-bold text-zinc-100 hover:text-emerald-400 transition-colors"
+            >
+              {hp.current}
+            </button>
+          )}
+          <span className="text-zinc-500 text-sm">/</span>
+          {editingMax ? (
+            <input
+              autoFocus
+              type="number"
+              value={maxDraft}
+              onChange={(e) => setMaxDraft(e.target.value)}
+              onBlur={commitMaxEdit}
+              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); commitMaxEdit(); } if (e.key === 'Escape') { setMaxDraft(String(hp.max)); setEditingMax(false); } }}
+              className="w-14 bg-zinc-800 border border-zinc-500 rounded px-1 text-sm text-zinc-100 text-center focus:outline-none"
+            />
+          ) : (
+            <button
+              onClick={() => { setMaxDraft(String(hp.max)); setEditingMax(true); }}
+              title="Click to set max HP"
+              className="text-zinc-500 text-sm hover:text-zinc-300 transition-colors"
+            >
+              {hp.max}
+            </button>
+          )}
+          <TempHpBadge temp={hp.temp} onChange={(temp) => onChange({ ...hp, temp })} />
+        </div>
+        <div className="w-full h-1.5 bg-zinc-800 rounded-full overflow-hidden mt-1">
+          <div className={`h-full ${barColor} transition-all duration-300`} style={{ width: `${pct}%` }} />
+        </div>
+      </div>
+      <div className="flex items-center gap-1">
+        <input
+          type="number"
+          value={delta}
+          onChange={(e) => setDelta(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') { e.preventDefault(); applyDelta(e.shiftKey ? 1 : -1); }
+          }}
+          placeholder="0"
+          title="Enter = damage · Shift+Enter = heal"
+          className="w-14 bg-zinc-800 border border-zinc-700 rounded px-1.5 py-1 text-xs text-center font-mono text-zinc-100 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+        />
+        <button onClick={() => applyDelta(-1)} className="p-1.5 rounded bg-red-950 hover:bg-red-900 text-red-400" title="Damage (Enter)">
+          <Minus className="w-3.5 h-3.5" />
+        </button>
+        <button onClick={() => applyDelta(1)} className="p-1.5 rounded bg-emerald-950 hover:bg-emerald-900 text-emerald-400" title="Heal (Shift+Enter)">
+          <Plus className="w-3.5 h-3.5" />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function StatPill({ icon: Icon, label, value, onChange, editMode, color = 'zinc-400', suffix = '' }) {
+  return (
+    <div className="flex flex-col items-center px-3 py-1.5 bg-zinc-900 border border-zinc-800 rounded-lg min-w-[64px]">
+      <div className="flex items-center gap-1 text-[10px] uppercase tracking-wider text-zinc-500">
+        <Icon className={`w-3 h-3 text-${color}`} />
+        {label}
+      </div>
+      {editMode ? (
+        <input
+          type={typeof value === 'number' ? 'number' : 'text'}
+          value={value}
+          onChange={(e) => onChange(typeof value === 'number' ? Number(e.target.value) : e.target.value)}
+          className="w-14 bg-transparent text-center font-mono text-lg font-bold text-zinc-100 focus:outline-none"
+        />
+      ) : (
+        <div className="font-mono text-lg font-bold text-zinc-100">{value}{suffix}</div>
+      )}
+    </div>
+  );
+}
+
+function ConditionToggles({ conditions, onToggle, custom, onAddCustom, onRemoveCustom }) {
+  const [showAll, setShowAll] = useState(false);
+  const visible = showAll ? CONDITIONS : CONDITIONS.slice(0, 8);
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      {visible.map((c) => (
+        <Badge key={c} color={c === 'Concentrating' ? 'sky' : 'amber'} active={conditions.includes(c)} onClick={() => onToggle(c)} size="xs">
+          {c}
+        </Badge>
+      ))}
+      {!showAll && (
+        <button onClick={() => setShowAll(true)} className="text-[10px] text-zinc-500 hover:text-zinc-300 underline">
+          +{CONDITIONS.length - 8} more
+        </button>
+      )}
+      {custom.map((c) => (
+        <Badge key={c} color="violet" active onRemove={() => onRemoveCustom(c)} size="xs">{c}</Badge>
+      ))}
+    </div>
+  );
+}
+
+function QuickCombatBar({ character, updateCharacter, editMode, setEditMode }) {
+  const [customCondition, setCustomCondition] = useState('');
+  const [concentrationPrompt, setConcentrationPrompt] = useState(null); // { dc } | null
+  const abilities = character.abilities;
+  const dexMod = abilityMod(abilities.dex);
+  const conMod = abilityMod(abilities.con);
+  const conSaveBonus = conMod + (character.saveProficiencies.includes('con') ? character.proficiencyBonus : 0);
+
+  const toggleCondition = (c) => {
+    const has = character.conditions.includes(c);
+    updateCharacter({ conditions: has ? character.conditions.filter((x) => x !== c) : [...character.conditions, c] });
+  };
+
+  const addCustomCondition = () => {
+    const v = customCondition.trim();
+    if (v && !character.conditions.includes(v)) {
+      updateCharacter({ conditions: [...character.conditions, v] });
+    }
+    setCustomCondition('');
+  };
+
+  const KNOWN = new Set(CONDITIONS);
+  const customActiveConditions = character.conditions.filter((c) => !KNOWN.has(c));
+  const knownActiveOnly = character.conditions.filter((c) => KNOWN.has(c));
+  const isConcentrating = character.conditions.includes('Concentrating');
+
+  const handleConcentrationCheck = (damageTaken) => {
+    const dc = Math.max(10, Math.floor(damageTaken / 2));
+    setConcentrationPrompt({ dc });
+  };
+
+  return (
+    <div className="sticky top-0 z-30 bg-zinc-950/95 backdrop-blur border-b border-zinc-800 shadow-lg">
+      <div className="px-4 py-3">
+        <div className="flex items-start justify-between gap-4 flex-wrap">
+          {/* Identity */}
+          <div className="flex items-center gap-3 min-w-[200px]">
+            <AvatarUpload character={character} onChange={updateCharacter} editMode={editMode} />
+            <div className="min-w-0">
+              {editMode ? (
+                <input
+                  value={character.name}
+                  onChange={(e) => updateCharacter({ name: e.target.value })}
+                  className="bg-zinc-800 border border-zinc-700 rounded px-2 py-0.5 text-base font-bold text-zinc-100 focus:outline-none focus:ring-1 focus:ring-emerald-500 w-full"
+                />
+              ) : (
+                <div className="text-base font-bold text-zinc-100 truncate">{character.name}</div>
+              )}
+              {editMode ? (
+                <input
+                  value={character.subtitle}
+                  onChange={(e) => updateCharacter({ subtitle: e.target.value })}
+                  placeholder="Subtitle / title"
+                  className="bg-zinc-800 border border-zinc-700 rounded px-2 py-0.5 text-xs text-zinc-400 focus:outline-none focus:ring-1 focus:ring-emerald-500 w-full mt-0.5"
+                />
+              ) : (
+                <div className="text-xs text-zinc-500 truncate">{character.subtitle || character.role}</div>
+              )}
+            </div>
+          </div>
+
+          {/* HP */}
+          <HPTracker
+            hp={character.hp}
+            onChange={(hp) => updateCharacter({ hp })}
+            editMode={editMode}
+            isConcentrating={isConcentrating}
+            onConcentrationCheck={handleConcentrationCheck}
+          />
+
+          {/* Stat pills */}
+          <div className="flex items-center gap-2">
+            <StatPill icon={Shield} label="AC" value={character.ac} color="sky-400" onChange={(v) => updateCharacter({ ac: v })} editMode={editMode} />
+            <StatPill icon={Footprints} label="Speed" value={character.speed} color="zinc-400" onChange={(v) => updateCharacter({ speed: v })} editMode={editMode} />
+            <StatPill icon={Zap} label="Init" value={character.initiativeMod ?? dexMod} suffix="" color="amber-400" onChange={(v) => updateCharacter({ initiativeMod: v })} editMode={editMode} />
+            <StatPill icon={Target} label="Prof" value={character.proficiencyBonus} color="violet-400" onChange={(v) => updateCharacter({ proficiencyBonus: v })} editMode={editMode} />
+          </div>
+
+          {/* Mode toggle: label shows current state, button shows the action */}
+          <div className="flex items-center gap-2">
+            <span className={`text-[10px] font-semibold uppercase tracking-wider px-2 py-1 rounded ${editMode ? 'bg-amber-950 text-amber-400' : 'bg-emerald-950 text-emerald-400'}`}>
+              {editMode ? 'Editing' : 'Playing'}
+            </span>
+            <button
+              onClick={() => setEditMode(!editMode)}
+              title={editMode ? 'Finish editing and return to play mode' : 'Switch to edit mode to change stats and content'}
+              className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold transition-colors ${
+                editMode ? 'bg-emerald-600 text-white hover:bg-emerald-500' : 'bg-zinc-800 text-zinc-300 hover:bg-zinc-700'
+              }`}
+            >
+              {editMode ? <PlayCircle className="w-3.5 h-3.5" /> : <PenSquare className="w-3.5 h-3.5" />}
+              {editMode ? 'Done Editing' : 'Edit'}
+            </button>
+          </div>
+        </div>
+
+        {/* Conditions row */}
+        <div className="mt-2.5 pt-2.5 border-t border-zinc-800/70 flex items-center gap-2 flex-wrap">
+          <span className="text-[10px] uppercase tracking-wider text-zinc-600 shrink-0">Conditions</span>
+          <ConditionToggles
+            conditions={knownActiveOnly}
+            onToggle={toggleCondition}
+            custom={customActiveConditions}
+            onRemoveCustom={(c) => updateCharacter({ conditions: character.conditions.filter((x) => x !== c) })}
+          />
+          {editMode && (
+            <input
+              value={customCondition}
+              onChange={(e) => setCustomCondition(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addCustomCondition(); } }}
+              onBlur={addCustomCondition}
+              placeholder="+ custom"
+              className="bg-transparent border-b border-dashed border-zinc-700 text-[10px] px-1 text-zinc-400 focus:outline-none focus:border-emerald-500 w-16"
+            />
+          )}
+        </div>
+
+        {concentrationPrompt && (
+          <div className="mt-2.5 flex items-center justify-between gap-2 bg-sky-950 border border-sky-800 rounded-lg px-3 py-2">
+            <span className="text-xs text-sky-300">
+              <strong>Concentration check:</strong> DC {concentrationPrompt.dc} CON save (yours: {fmtMod(conSaveBonus)})
+            </span>
+            <button onClick={() => setConcentrationPrompt(null)} className="text-sky-500 hover:text-sky-300">
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
+// TAB: MAIN STATS & DEFENSES
+// ============================================================
+
+function AbilityBlock({ character, updateCharacter, editMode }) {
+  const toggleSave = (ab) => {
+    const has = character.saveProficiencies.includes(ab);
+    updateCharacter({ saveProficiencies: has ? character.saveProficiencies.filter((x) => x !== ab) : [...character.saveProficiencies, ab] });
+  };
+
+  return (
+    <Collapsible title="Ability Scores & Saves" defaultOpen>
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+        {ABILITIES.map((ab) => {
+          const score = character.abilities[ab];
+          const mod = abilityMod(score);
+          const isProf = character.saveProficiencies.includes(ab);
+          return (
+            <div key={ab} className="flex flex-col items-center bg-zinc-950 border border-zinc-800 rounded-lg p-2.5">
+              <div className="text-[10px] uppercase tracking-widest text-zinc-500 font-semibold">{ABILITY_LABELS[ab]}</div>
+              {editMode ? (
+                <input
+                  type="number"
+                  value={score}
+                  onChange={(e) => updateCharacter({ abilities: { ...character.abilities, [ab]: Number(e.target.value) } })}
+                  className="w-12 text-center bg-zinc-800 border border-zinc-700 rounded mt-1 font-mono text-zinc-100 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                />
+              ) : (
+                <div className="font-mono text-2xl font-bold text-zinc-100 mt-0.5">{score}</div>
+              )}
+              <div className="font-mono text-sm text-emerald-400">{fmtMod(mod)}</div>
+              <button
+                onClick={() => toggleSave(ab)}
+                className={`mt-1.5 flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded border ${
+                  isProf ? 'bg-violet-950 border-violet-700 text-violet-300' : 'bg-transparent border-zinc-700 text-zinc-600'
+                }`}
+              >
+                {isProf ? <CheckCircle2 className="w-3 h-3" /> : <Circle className="w-3 h-3" />}
+                Save {fmtMod(mod + (isProf ? character.proficiencyBonus : 0))}
+              </button>
+            </div>
+          );
+        })}
+      </div>
+    </Collapsible>
+  );
+}
+
+function CustomStatsBlock({ character, updateCharacter, editMode }) {
+  const addStat = () => updateCharacter({ customStats: [...character.customStats, { id: uid(), label: 'New Stat', value: '' }] });
+  const updateStat = (id, patch) => updateCharacter({ customStats: character.customStats.map((s) => (s.id === id ? { ...s, ...patch } : s)) });
+  const removeStat = (id) => updateCharacter({ customStats: character.customStats.filter((s) => s.id !== id) });
+
+  if (character.customStats.length === 0 && !editMode) return null;
+
+  return (
+    <Collapsible title="Custom Stats" defaultOpen={character.customStats.length > 0}>
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+        {character.customStats.map((s) => (
+          <div key={s.id} className="bg-zinc-950 border border-zinc-800 rounded-lg p-2 relative group">
+            {editMode ? (
+              <>
+                <input
+                  value={s.label}
+                  onChange={(e) => updateStat(s.id, { label: e.target.value })}
+                  className="w-full bg-transparent text-[10px] uppercase tracking-wider text-zinc-500 focus:outline-none"
+                />
+                <input
+                  value={s.value}
+                  onChange={(e) => updateStat(s.id, { value: e.target.value })}
+                  className="w-full bg-transparent font-mono text-lg font-bold text-zinc-100 focus:outline-none"
+                />
+                <button onClick={() => removeStat(s.id)} className="absolute top-1 right-1 text-zinc-600 hover:text-red-400">
+                  <X className="w-3 h-3" />
+                </button>
+              </>
+            ) : (
+              <>
+                <div className="text-[10px] uppercase tracking-wider text-zinc-500">{s.label}</div>
+                <div className="font-mono text-lg font-bold text-zinc-100">{s.value}</div>
+              </>
+            )}
+          </div>
+        ))}
+        {editMode && (
+          <button onClick={addStat} className="flex items-center justify-center gap-1 bg-zinc-950 border border-dashed border-zinc-700 rounded-lg p-2 text-xs text-zinc-500 hover:text-emerald-400 hover:border-emerald-700">
+            <Plus className="w-3.5 h-3.5" /> Add Stat
+          </button>
+        )}
+      </div>
+    </Collapsible>
+  );
+}
+
+function SkillsBlock({ character, updateCharacter, editMode }) {
+  const skillExpertise = character.skillExpertise || [];
+  const skillOverrides = character.skillOverrides || {};
+
+  // Cycles a skill through None -> Proficient -> Expertise -> None.
+  const cycleSkill = (key) => {
+    const isProf = character.skillProficiencies.includes(key);
+    const isExpert = skillExpertise.includes(key);
+    if (!isProf) {
+      updateCharacter({ skillProficiencies: [...character.skillProficiencies, key] });
+    } else if (isProf && !isExpert) {
+      updateCharacter({ skillExpertise: [...skillExpertise, key] });
+    } else {
+      updateCharacter({
+        skillProficiencies: character.skillProficiencies.filter((x) => x !== key),
+        skillExpertise: skillExpertise.filter((x) => x !== key),
+      });
+    }
+  };
+
+  const setOverride = (key, value) => {
+    const next = { ...skillOverrides };
+    if (value === '' || value === null) {
+      delete next[key];
+    } else {
+      next[key] = Number(value);
+    }
+    updateCharacter({ skillOverrides: next });
+  };
+
+  return (
+    <Collapsible title="Skills" defaultOpen={false}>
+      <p className="text-[10px] text-zinc-600 mb-2">Click the circle to cycle proficiency: none → proficient → expertise (double bonus).</p>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-1">
+        {SKILLS.map((sk) => {
+          const mod = abilityMod(character.abilities[sk.ability]);
+          const isProf = character.skillProficiencies.includes(sk.key);
+          const isExpert = skillExpertise.includes(sk.key);
+          const profMultiplier = isExpert ? 2 : isProf ? 1 : 0;
+          const computedTotal = mod + profMultiplier * character.proficiencyBonus;
+          const hasOverride = Object.prototype.hasOwnProperty.call(skillOverrides, sk.key);
+          const total = hasOverride ? skillOverrides[sk.key] : computedTotal;
+          return (
+            <div key={sk.key} className="flex items-center justify-between px-2 py-1 rounded hover:bg-zinc-800/50">
+              <button onClick={() => cycleSkill(sk.key)} className="flex items-center gap-1.5 text-sm text-zinc-300 text-left flex-1 min-w-0">
+                {isExpert ? (
+                  <Star className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                ) : isProf ? (
+                  <CheckCircle2 className="w-3.5 h-3.5 text-violet-400 shrink-0" />
+                ) : (
+                  <Circle className="w-3.5 h-3.5 text-zinc-700 shrink-0" />
+                )}
+                <span className="truncate">{sk.label}</span>
+                <span className="text-[10px] text-zinc-600 uppercase shrink-0">{sk.ability}</span>
+                {isExpert && <span className="text-[9px] text-amber-500 shrink-0">(Expertise)</span>}
+              </button>
+              {editMode ? (
+                <input
+                  type="number"
+                  value={hasOverride ? skillOverrides[sk.key] : ''}
+                  placeholder={fmtMod(computedTotal)}
+                  onChange={(e) => setOverride(sk.key, e.target.value)}
+                  title="Override this skill's bonus manually — leave blank to use the computed value"
+                  className="w-14 bg-zinc-800 border border-zinc-700 rounded px-1 py-0.5 text-xs text-center font-mono text-zinc-100 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                />
+              ) : (
+                <span className={`font-mono text-sm ${hasOverride ? 'text-amber-300' : 'text-zinc-200'}`}>{fmtMod(total)}</span>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </Collapsible>
+  );
+}
+
+function DefensesBlock({ character, updateCharacter, editMode }) {
+  const categories = [
+    { key: 'vulnerabilities', label: 'Vulnerabilities', color: 'red', options: DAMAGE_TYPES },
+    { key: 'resistances', label: 'Resistances', color: 'emerald', options: DAMAGE_TYPES },
+    { key: 'immunities', label: 'Immunities', color: 'violet', options: DAMAGE_TYPES },
+    { key: 'conditionImmunities', label: 'Condition Immunities', color: 'amber', options: CONDITIONS },
+  ];
+  return (
+    <Collapsible title="Defenses & Resistances" defaultOpen>
+      <div className="space-y-3">
+        {categories.map((cat) => (
+          <div key={cat.key}>
+            <div className="text-xs font-medium text-zinc-400 mb-1.5">{cat.label}</div>
+            {editMode ? (
+              <ChipSelect
+                options={cat.options}
+                selected={character[cat.key]}
+                onToggle={(opt) => {
+                  const has = character[cat.key].includes(opt);
+                  updateCharacter({ [cat.key]: has ? character[cat.key].filter((x) => x !== opt) : [...character[cat.key], opt] });
+                }}
+                color={cat.color}
+              />
+            ) : character[cat.key].length > 0 ? (
+              <div className="flex flex-wrap gap-1.5">
+                {character[cat.key].map((v) => <Badge key={v} color={cat.color} size="xs">{v}</Badge>)}
+              </div>
+            ) : (
+              <span className="text-xs text-zinc-600 italic">None</span>
+            )}
+          </div>
+        ))}
+      </div>
+    </Collapsible>
+  );
+}
+
+function SensesBlock({ character, updateCharacter, editMode }) {
+  const customSenses = character.senses.customSenses || [];
+
+  // One-time migration: older saved characters may only have the legacy
+  // single "custom" string. Fold it into the new list so nothing is lost.
+  useEffect(() => {
+    if (character.senses.custom && customSenses.length === 0) {
+      updateCharacter({
+        senses: {
+          ...character.senses,
+          custom: '',
+          customSenses: [{ id: uid(), name: character.senses.custom }],
+        },
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const addSense = () => updateCharacter({ senses: { ...character.senses, customSenses: [...customSenses, { id: uid(), name: '' }] } });
+  const updateSense = (id, name) => updateCharacter({ senses: { ...character.senses, customSenses: customSenses.map((s) => (s.id === id ? { ...s, name } : s)) } });
+  const removeSense = (id) => updateCharacter({ senses: { ...character.senses, customSenses: customSenses.filter((s) => s.id !== id) } });
+
+  return (
+    <Collapsible title="Senses & Passives" defaultOpen>
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-3">
+        <NumberField label="Passive Perception" value={character.senses.passivePerception} onChange={(v) => updateCharacter({ senses: { ...character.senses, passivePerception: v } })} editMode={editMode} />
+        <NumberField label="Darkvision (ft)" value={character.senses.darkvision} onChange={(v) => updateCharacter({ senses: { ...character.senses, darkvision: v } })} editMode={editMode} />
+      </div>
+
+      <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-1.5 flex items-center justify-between">
+        <span>Other Senses</span>
+        {editMode && (
+          <button onClick={addSense} className="flex items-center gap-1 text-emerald-400 hover:text-emerald-300 normal-case tracking-normal text-xs">
+            <Plus className="w-3 h-3" /> Add Sense
+          </button>
+        )}
+      </div>
+      {customSenses.length === 0 ? (
+        <div className="text-xs text-zinc-600 italic">None (Tremorsense, Blindsight, Truesight, etc.)</div>
+      ) : (
+        <div className="flex flex-wrap gap-2">
+          {customSenses.map((s) =>
+            editMode ? (
+              <div key={s.id} className="flex items-center gap-1 bg-zinc-950 border border-zinc-800 rounded-md pl-2 pr-1 py-1">
+                <input
+                  value={s.name}
+                  onChange={(e) => updateSense(s.id, e.target.value)}
+                  placeholder="Tremorsense 60 ft"
+                  className="bg-transparent text-xs text-zinc-200 focus:outline-none w-32"
+                />
+                <button onClick={() => removeSense(s.id)} className="text-zinc-600 hover:text-red-400">
+                  <X className="w-3 h-3" />
+                </button>
+              </div>
+            ) : (
+              <Badge key={s.id} size="xs">{s.name || 'Unnamed sense'}</Badge>
+            )
+          )}
+        </div>
+      )}
+    </Collapsible>
+  );
+}
+
+function StatsAndDefensesTab({ character, updateCharacter, editMode }) {
+  return (
+    <div className="space-y-3">
+      <AbilityBlock character={character} updateCharacter={updateCharacter} editMode={editMode} />
+      <CustomStatsBlock character={character} updateCharacter={updateCharacter} editMode={editMode} />
+      <SkillsBlock character={character} updateCharacter={updateCharacter} editMode={editMode} />
+      <DefensesBlock character={character} updateCharacter={updateCharacter} editMode={editMode} />
+      <SensesBlock character={character} updateCharacter={updateCharacter} editMode={editMode} />
+    </div>
+  );
+}
+
+// ============================================================
+// TAB: ACTIONS & COMBAT POWERS
+// ============================================================
+
+function ActionCard({ action, onUpdate, onRemove, editMode }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="bg-zinc-950 border border-zinc-800 rounded-lg p-2.5">
+      <div className="flex items-center justify-between gap-2">
+        <button onClick={() => setOpen(!open)} className="flex items-center gap-2 flex-1 min-w-0 text-left">
+          {open ? <ChevronDown className="w-3.5 h-3.5 text-zinc-500 shrink-0" /> : <ChevronRight className="w-3.5 h-3.5 text-zinc-500 shrink-0" />}
+          {editMode ? (
+            <input
+              value={action.name}
+              onChange={(e) => onUpdate({ name: e.target.value })}
+              onClick={(e) => e.stopPropagation()}
+              className="bg-zinc-800 border border-zinc-700 rounded px-2 py-0.5 text-sm font-semibold text-zinc-100 focus:outline-none focus:ring-1 focus:ring-emerald-500 min-w-0 flex-1"
+            />
+          ) : (
+            <span className="text-sm font-semibold text-zinc-100 truncate">{action.name}</span>
+          )}
+          {action.cost && <Badge color="amber" size="xs">{action.cost}</Badge>}
+        </button>
+        {editMode && (
+          <button onClick={() => onRemove()} className="text-zinc-600 hover:text-red-400 shrink-0">
+            <Trash2 className="w-3.5 h-3.5" />
+          </button>
+        )}
+      </div>
+      {open && (
+        <div className="mt-2 pl-5 space-y-2">
+          {editMode && (
+            <TextField label="Cost (e.g. Costs 2 Legendary Actions)" value={action.cost} onChange={(v) => onUpdate({ cost: v })} editMode={editMode} />
+          )}
+          <TextArea value={action.description} onChange={(v) => onUpdate({ description: v })} editMode={editMode} placeholder="+9 to hit, reach 10ft, 2d8+5 fire damage." rows={2} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function LegendaryCounter({ character, updateCharacter, editMode }) {
+  const max = character.legendaryActionsPerRound || 0;
+  const used = character.legendaryActionsUsed || 0;
+  const remaining = max - used;
+  const [editingRemaining, setEditingRemaining] = useState(false);
+  const [remainingDraft, setRemainingDraft] = useState(String(remaining));
+  const [editingMax, setEditingMax] = useState(false);
+  const [maxDraft, setMaxDraft] = useState(String(max));
+
+  const commitRemaining = () => {
+    const r = clamp(Number(remainingDraft) || 0, 0, max);
+    updateCharacter({ legendaryActionsUsed: max - r });
+    setEditingRemaining(false);
+  };
+
+  const commitMax = () => {
+    const m = Math.max(0, Number(maxDraft) || 0);
+    updateCharacter({ legendaryActionsPerRound: m, legendaryActionsUsed: Math.min(used, m) });
+    setEditingMax(false);
+  };
+
+  return (
+    <Card className="p-3 flex items-center justify-between flex-wrap gap-2">
+      <div className="flex items-center gap-2">
+        <Crown className="w-4 h-4 text-amber-400" />
+        <span className="text-sm font-medium text-zinc-300">Legendary Actions per Round</span>
+        {editingMax ? (
+          <input
+            autoFocus
+            type="number"
+            value={maxDraft}
+            onChange={(e) => setMaxDraft(e.target.value)}
+            onBlur={commitMax}
+            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); commitMax(); } if (e.key === 'Escape') setEditingMax(false); }}
+            className="w-12 bg-zinc-800 border border-amber-600 rounded px-1 text-sm text-center font-mono text-zinc-100 focus:outline-none"
+          />
+        ) : (
+          <button
+            onClick={() => { setMaxDraft(String(max)); setEditingMax(true); }}
+            title="Click to set max legendary actions per round"
+            className="font-mono text-sm font-bold text-amber-400 hover:text-amber-300 bg-amber-950 border border-amber-800 rounded px-2 py-0.5"
+          >
+            {max}
+          </button>
+        )}
+      </div>
+      {max > 0 && (
+        <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1">
+            {Array.from({ length: max }).map((_, i) => (
+              <button
+                key={i}
+                onClick={() => updateCharacter({ legendaryActionsUsed: i < used ? i : i + 1 })}
+                className={`w-6 h-6 rounded-full border-2 flex items-center justify-center transition-colors ${
+                  i < used ? 'bg-zinc-800 border-zinc-700' : 'bg-amber-500 border-amber-300'
+                }`}
+              />
+            ))}
+          </div>
+          {editingRemaining ? (
+            <input
+              autoFocus
+              type="number"
+              value={remainingDraft}
+              onChange={(e) => setRemainingDraft(e.target.value)}
+              onBlur={commitRemaining}
+              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); commitRemaining(); } if (e.key === 'Escape') setEditingRemaining(false); }}
+              className="w-10 bg-zinc-800 border border-amber-600 rounded px-1 text-sm text-center font-mono text-zinc-100 focus:outline-none"
+            />
+          ) : (
+            <button
+              onClick={() => { setRemainingDraft(String(remaining)); setEditingRemaining(true); }}
+              title="Click to set exact remaining legendary actions"
+              className="font-mono text-sm text-zinc-400 hover:text-amber-300"
+            >
+              {remaining}
+            </button>
+          )}
+          <span className="font-mono text-sm text-zinc-600">/{max}</span>
+          <button onClick={() => updateCharacter({ legendaryActionsUsed: 0 })} className="text-[10px] text-zinc-500 hover:text-emerald-400 underline">Reset</button>
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function PoolCurrentEditor({ pool, onChange }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(String(pool.current));
+
+  const commit = () => {
+    onChange(clamp(Number(draft) || 0, 0, pool.max));
+    setEditing(false);
+  };
+
+  if (editing) {
+    return (
+      <input
+        autoFocus
+        type="number"
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); commit(); } if (e.key === 'Escape') setEditing(false); }}
+        className="w-12 bg-zinc-800 border border-violet-600 rounded px-1 text-xs text-center font-mono text-zinc-100 focus:outline-none"
+      />
+    );
+  }
+
+  return (
+    <button onClick={() => { setDraft(String(pool.current)); setEditing(true); }} title="Click to set exact value" className="font-mono text-xs text-zinc-500 hover:text-violet-300">
+      {pool.current}/{pool.max}
+    </button>
+  );
+}
+
+const RECHARGE_TYPES = [
+  { key: 'manual', label: 'Manual only' },
+  { key: 'round', label: 'Refills each round' },
+  { key: 'shortRest', label: 'Refills on short rest' },
+  { key: 'longRest', label: 'Refills on long rest' },
+  { key: 'diceRoll', label: 'Recharges on a dice roll' },
+];
+
+// Reads a pool's recharge type, migrating the older boolean
+// resetsEachRound flag (from before this feature existed) to 'round'.
+function getRechargeType(pool) {
+  if (pool.rechargeType) return pool.rechargeType;
+  if (pool.resetsEachRound) return 'round';
+  return 'manual';
+}
+
+function InlineNumberEditor({ value, onChange, min = 1, className = '' }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(String(value));
+
+  const commit = () => {
+    onChange(Math.max(min, Number(draft) || min));
+    setEditing(false);
+  };
+
+  if (editing) {
+    return (
+      <input
+        autoFocus
+        type="number"
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); commit(); } if (e.key === 'Escape') setEditing(false); }}
+        className={`w-8 bg-zinc-800 border border-violet-600 rounded text-center font-mono text-[10px] focus:outline-none ${className}`}
+      />
+    );
+  }
+
+  return (
+    <button onClick={() => { setDraft(String(value)); setEditing(true); }} title="Click to edit" className={`hover:text-violet-300 underline decoration-dotted underline-offset-2 ${className}`}>
+      {value}
+    </button>
+  );
+}
+
+function RechargeRoller({ pool, onUpdate }) {
+  const [lastRoll, setLastRoll] = useState(null);
+  const die = pool.rechargeDie || 6;
+  const threshold = pool.rechargeThreshold || 5;
+
+  const roll = () => {
+    const result = 1 + Math.floor(Math.random() * die);
+    setLastRoll(result);
+    if (result >= threshold) onUpdate({ current: pool.max });
+  };
+
+  return (
+    <div className="flex items-center gap-2 flex-wrap text-[10px]">
+      <button onClick={roll} className="flex items-center gap-1 px-2 py-1 rounded bg-violet-950 border border-violet-800 text-violet-300 hover:bg-violet-900">
+        <Zap className="w-3 h-3" /> Roll d<InlineNumberEditor value={die} min={2} onChange={(v) => onUpdate({ rechargeDie: v })} />
+      </button>
+      <span className="text-zinc-500">
+        recharges on <InlineNumberEditor value={threshold} min={1} onChange={(v) => onUpdate({ rechargeThreshold: v })} />–{die}
+      </span>
+      {lastRoll !== null && (
+        <span className={`font-mono ${lastRoll >= threshold ? 'text-emerald-400' : 'text-zinc-500'}`}>
+          Rolled {lastRoll}{lastRoll >= threshold ? ' — recharged!' : ''}
+        </span>
+      )}
+    </div>
+  );
+}
+
+function PoolMaxEditor({ pool, onChange }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(String(pool.max));
+
+  const commit = () => {
+    const m = Math.max(0, Number(draft) || 0);
+    onChange(m);
+    setEditing(false);
+  };
+
+  if (editing) {
+    return (
+      <input
+        autoFocus
+        type="number"
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); commit(); } if (e.key === 'Escape') setEditing(false); }}
+        className="w-14 bg-zinc-800 border border-violet-600 rounded px-1 py-0.5 text-xs text-center font-mono text-zinc-100 focus:outline-none"
+      />
+    );
+  }
+
+  return (
+    <button
+      onClick={() => { setDraft(String(pool.max)); setEditing(true); }}
+      title="Click to set total uses"
+      className="flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded border border-zinc-700 text-zinc-500 hover:text-violet-300 hover:border-violet-700"
+    >
+      Total: <span className="font-mono text-zinc-300">{pool.max}</span>
+    </button>
+  );
+}
+
+function ResourcePoolCard({ pool, onUpdate, onRemove, editMode }) {
+  const rechargeType = getRechargeType(pool);
+  return (
+    <div className="bg-zinc-950 border border-zinc-800 rounded-lg p-2.5">
+      <div className="flex items-center justify-between mb-1.5 gap-2">
+        {editMode ? (
+          <input
+            value={pool.name}
+            onChange={(e) => onUpdate({ name: e.target.value })}
+            className="bg-transparent text-xs font-medium text-zinc-300 focus:outline-none flex-1 min-w-0"
+          />
+        ) : (
+          <span className="text-xs font-medium text-zinc-300 truncate">{pool.name}</span>
+        )}
+        <div className="flex items-center gap-1.5 shrink-0">
+          <PoolMaxEditor pool={pool} onChange={(max) => onUpdate({ max, current: Math.min(pool.current, max) })} />
+          {editMode && (
+            <button onClick={onRemove} className="text-zinc-600 hover:text-red-400">
+              <X className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
+      </div>
+
+      <div className="flex items-center gap-2">
+        <div className="flex gap-1 flex-wrap flex-1">
+          {Array.from({ length: pool.max }).map((_, i) => (
+            <button
+              key={i}
+              onClick={() => onUpdate({ current: i < pool.current ? i : i + 1 })}
+              title={i < pool.current ? 'Click to mark as used' : 'Click to mark as available'}
+              className={`w-5 h-5 rounded border-2 transition-colors ${i < pool.current ? 'bg-violet-500 border-violet-300' : 'bg-zinc-800 border-zinc-700'}`}
+            />
+          ))}
+        </div>
+        <PoolCurrentEditor pool={pool} onChange={(current) => onUpdate({ current })} />
+      </div>
+
+      {editMode ? (
+        <div className="mt-2 pt-2 border-t border-zinc-900 space-y-1.5">
+          <div className="text-[10px] uppercase tracking-wider text-zinc-500">Recharges</div>
+          <select
+            value={rechargeType}
+            onChange={(e) => onUpdate({ rechargeType: e.target.value })}
+            className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-xs text-zinc-100 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+          >
+            {RECHARGE_TYPES.map((rt) => <option key={rt.key} value={rt.key}>{rt.label}</option>)}
+          </select>
+          {rechargeType === 'diceRoll' && (
+            <div className="flex items-center gap-2 text-xs text-zinc-400">
+              <span>Recharges on</span>
+              <NumberField value={pool.rechargeThreshold || 5} min={1} onChange={(v) => onUpdate({ rechargeThreshold: v })} className="w-12" />
+              <span>–</span>
+              <NumberField value={pool.rechargeDie || 6} min={1} onChange={(v) => onUpdate({ rechargeDie: v })} className="w-12" />
+              <span>(d{pool.rechargeDie || 6})</span>
+            </div>
+          )}
+        </div>
+      ) : (
+        rechargeType === 'diceRoll' && (
+          <div className="mt-1.5">
+            {pool.current < pool.max ? (
+              <RechargeRoller pool={pool} onUpdate={onUpdate} />
+            ) : (
+              <div className="flex items-center gap-2 flex-wrap text-[10px] text-zinc-600">
+                <span>Full — recharges on <InlineNumberEditor value={pool.rechargeThreshold || 5} min={1} onChange={(v) => onUpdate({ rechargeThreshold: v })} />–<InlineNumberEditor value={pool.rechargeDie || 6} min={2} onChange={(v) => onUpdate({ rechargeDie: v })} /></span>
+              </div>
+            )}
+          </div>
+        )
+      )}
+    </div>
+  );
+}
+
+const RECHARGE_GROUPS = [
+  { key: 'shortRest', label: 'Short Rest', accent: 'sky' },
+  { key: 'longRest', label: 'Long Rest', accent: 'violet' },
+  { key: 'round', label: 'Per Round', accent: 'amber' },
+  { key: 'diceRoll', label: 'Recharge Roll', accent: 'emerald' },
+  { key: 'manual', label: 'Manual / Other', accent: 'zinc' },
+];
+
+function ResourcesSection({ character, updateCharacter, editMode }) {
+  const pools = character.resourcePools;
+  const addPool = () => updateCharacter({ resourcePools: [...pools, { id: uid(), name: 'New Resource', current: 1, max: 1, rechargeType: 'manual', rechargeDie: 6, rechargeThreshold: 5 }] });
+  const updatePool = (id, patch) => updateCharacter({ resourcePools: pools.map((p) => (p.id === id ? { ...p, ...patch } : p)) });
+  const removePool = (id) => updateCharacter({ resourcePools: pools.filter((p) => p.id !== id) });
+
+  const takeRest = (type) => {
+    updateCharacter({
+      resourcePools: pools.map((p) => {
+        const rt = getRechargeType(p);
+        // A long rest also restores everything a short rest would.
+        const shouldRefill = type === 'longRest' ? (rt === 'shortRest' || rt === 'longRest') : rt === 'shortRest';
+        return shouldRefill ? { ...p, current: p.max } : p;
+      }),
+    });
+  };
+
+  const shortRestCount = pools.filter((p) => getRechargeType(p) === 'shortRest').length;
+  const longRestCount = pools.filter((p) => ['shortRest', 'longRest'].includes(getRechargeType(p))).length;
+
+  return (
+    <div className="space-y-3">
+      <Card className="p-3 flex items-center justify-between flex-wrap gap-2">
+        <div className="flex items-center gap-2 text-sm font-medium text-zinc-300">
+          <Zap className="w-4 h-4 text-violet-400" /> Rest
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => takeRest('shortRest')}
+            disabled={shortRestCount === 0}
+            className="flex items-center gap-1.5 bg-sky-900 hover:bg-sky-800 disabled:opacity-40 disabled:cursor-not-allowed text-sky-200 text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors"
+          >
+            Take a Short Rest {shortRestCount > 0 && `(${shortRestCount})`}
+          </button>
+          <button
+            onClick={() => takeRest('longRest')}
+            disabled={longRestCount === 0}
+            className="flex items-center gap-1.5 bg-violet-800 hover:bg-violet-700 disabled:opacity-40 disabled:cursor-not-allowed text-violet-100 text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors"
+          >
+            Take a Long Rest {longRestCount > 0 && `(${longRestCount})`}
+          </button>
+        </div>
+      </Card>
+
+      {pools.length === 0 ? (
+        <Card className="p-4 text-center">
+          <div className="text-xs text-zinc-600 italic">No resource pools yet. Add one for anything with limited uses — spell slots, ki points, breath weapons, homebrew power points.</div>
+          {editMode && (
+            <button onClick={addPool} className="mt-3 flex items-center gap-1.5 mx-auto bg-violet-700 hover:bg-violet-600 text-white text-xs font-semibold px-3 py-1.5 rounded-lg">
+              <Plus className="w-3.5 h-3.5" /> Add Resource
+            </button>
+          )}
+        </Card>
+      ) : (
+        RECHARGE_GROUPS.map((group) => {
+          const groupPools = pools.filter((p) => getRechargeType(p) === group.key);
+          if (groupPools.length === 0) return null;
+          return (
+            <Collapsible key={group.key} title={group.label} defaultOpen badge={<span className="text-[10px] text-zinc-600 font-mono">({groupPools.length})</span>}>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {groupPools.map((p) => (
+                  <ResourcePoolCard key={p.id} pool={p} onUpdate={(patch) => updatePool(p.id, patch)} onRemove={() => removePool(p.id)} editMode={editMode} />
+                ))}
+              </div>
+            </Collapsible>
+          );
+        })
+      )}
+
+      {editMode && pools.length > 0 && (
+        <button onClick={addPool} className="w-full flex items-center justify-center gap-1.5 bg-zinc-900 border border-dashed border-zinc-700 hover:border-violet-700 text-zinc-500 hover:text-violet-300 text-xs font-semibold px-3 py-2 rounded-lg transition-colors">
+          <Plus className="w-3.5 h-3.5" /> Add Resource
+        </button>
+      )}
+    </div>
+  );
+}
+
+function NextRoundButton({ character, updateCharacter }) {
+  const hasLegendary = (character.legendaryActionsPerRound || 0) > 0;
+  const perRoundPools = (character.resourcePools || []).filter((p) => getRechargeType(p) === 'round');
+  if (!hasLegendary && perRoundPools.length === 0) return null;
+
+  const advance = () => {
+    const patch = {};
+    if (hasLegendary) patch.legendaryActionsUsed = 0;
+    if (perRoundPools.length > 0) {
+      patch.resourcePools = character.resourcePools.map((p) => (getRechargeType(p) === 'round' ? { ...p, current: p.max } : p));
+    }
+    updateCharacter(patch);
+  };
+
+  return (
+    <button
+      onClick={advance}
+      className="w-full flex items-center justify-center gap-2 bg-violet-700 hover:bg-violet-600 text-white text-sm font-semibold px-3 py-2.5 rounded-lg transition-colors"
+    >
+      <Zap className="w-4 h-4" /> Next Round
+      <span className="text-[10px] font-normal text-violet-200">
+        (resets{hasLegendary ? ' legendary actions' : ''}{hasLegendary && perRoundPools.length > 0 ? ' +' : ''}{perRoundPools.length > 0 ? ` ${perRoundPools.length} resource${perRoundPools.length > 1 ? 's' : ''}` : ''})
+      </span>
+    </button>
+  );
+}
+
+function ActionsTab({ character, updateCharacter, editMode }) {
+  const addAction = (category) => updateCharacter({
+    actions: [...character.actions, { id: uid(), category, name: category === 'legendary' ? 'New Legendary Action' : 'New Action', cost: '', description: '' }],
+  });
+  const updateAction = (id, patch) => updateCharacter({ actions: character.actions.map((a) => (a.id === id ? { ...a, ...patch } : a)) });
+  const removeAction = (id) => updateCharacter({ actions: character.actions.filter((a) => a.id !== id) });
+
+  const categories = ['action', 'bonus', 'reaction', 'lair'];
+  const legendaryItems = character.actions.filter((a) => a.category === 'legendary');
+  const hasLegendary = (character.legendaryActionsPerRound || 0) > 0;
+
+  return (
+    <div className="space-y-3">
+      <NextRoundButton character={character} updateCharacter={updateCharacter} />
+
+      {/* Legendary Actions — shown whenever the creature has any set up, or
+          always in Edit Mode so a player building a new boss can find it. */}
+      {(hasLegendary || legendaryItems.length > 0 || editMode) && (
+        <>
+          <LegendaryCounter character={character} updateCharacter={updateCharacter} editMode={editMode} />
+          <Collapsible
+            title="Legendary Action Abilities"
+            defaultOpen
+            badge={legendaryItems.length > 0 && <span className="text-[10px] text-zinc-600 font-mono">({legendaryItems.length})</span>}
+            right={editMode && <IconButton icon={Plus} label="Add" onClick={(e) => { e.stopPropagation(); addAction('legendary'); }} variant="primary" />}
+          >
+            {legendaryItems.length === 0 ? (
+              <div className="text-xs text-zinc-600 italic">No legendary actions yet. Add one for each option the creature can take, e.g. "Detect" (1 action) or "Attack" (2 actions).</div>
+            ) : (
+              <div className="space-y-2">
+                {legendaryItems.map((a) => (
+                  <ActionCard key={a.id} action={a} onUpdate={(patch) => updateAction(a.id, patch)} onRemove={() => removeAction(a.id)} editMode={editMode} />
+                ))}
+              </div>
+            )}
+          </Collapsible>
+        </>
+      )}
+
+      {/* Resources — spell slots, ki, breath weapons, homebrew power points,
+          grouped by how they recharge, with rest buttons to bulk-refill. */}
+      <ResourcesSection character={character} updateCharacter={updateCharacter} editMode={editMode} />
+
+      {categories.map((cat) => {
+        const items = character.actions.filter((a) => a.category === cat);
+        if (items.length === 0 && !editMode) return null;
+        if (cat === 'lair' && items.length === 0 && !editMode) return null;
+        return (
+          <Collapsible
+            key={cat}
+            title={ACTION_CATEGORY_LABELS[cat]}
+            defaultOpen={cat === 'action'}
+            badge={items.length > 0 && <span className="text-[10px] text-zinc-600 font-mono">({items.length})</span>}
+            right={editMode && <IconButton icon={Plus} label="Add" onClick={(e) => { e.stopPropagation(); addAction(cat); }} variant="primary" />}
+          >
+            {items.length === 0 ? (
+              <div className="text-xs text-zinc-600 italic">None yet.</div>
+            ) : (
+              <div className="space-y-2">
+                {items.map((a) => (
+                  <ActionCard key={a.id} action={a} onUpdate={(patch) => updateAction(a.id, patch)} onRemove={() => removeAction(a.id)} editMode={editMode} />
+                ))}
+              </div>
+            )}
+          </Collapsible>
+        );
+      })}
+    </div>
+  );
+}
+
+// ============================================================
+// TAB: HOMEBREW POWERS & ITEMS
+// ============================================================
+
+const RARITY_COLORS = {
+  Common: 'zinc', Uncommon: 'emerald', Rare: 'sky', 'Very Rare': 'violet', Legendary: 'amber', Artifact: 'red',
+};
+
+function ItemAbilityRow({ ability, onUpdate, onRemove, editMode }) {
+  return (
+    <div className="bg-zinc-900 border border-zinc-800 rounded-md p-2">
+      <div className="flex items-center justify-between gap-2 mb-1">
+        {editMode ? (
+          <input
+            value={ability.name}
+            onChange={(e) => onUpdate({ name: e.target.value })}
+            placeholder="Ability name"
+            className="bg-zinc-800 border border-zinc-700 rounded px-1.5 py-0.5 text-xs font-semibold text-zinc-100 focus:outline-none focus:ring-1 focus:ring-emerald-500 flex-1 min-w-0"
+          />
+        ) : (
+          <span className="text-xs font-semibold text-zinc-200 truncate">{ability.name || 'Unnamed Ability'}</span>
+        )}
+        <div className="flex items-center gap-1.5 shrink-0">
+          {editMode ? (
+            <input
+              value={ability.usage}
+              onChange={(e) => onUpdate({ usage: e.target.value })}
+              placeholder="1/Day"
+              className="w-20 bg-zinc-800 border border-zinc-700 rounded px-1.5 py-0.5 text-[10px] text-amber-300 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+            />
+          ) : (
+            ability.usage && <Badge color="amber" size="xs">{ability.usage}</Badge>
+          )}
+          {editMode && (
+            <button onClick={onRemove} className="text-zinc-600 hover:text-red-400">
+              <X className="w-3 h-3" />
+            </button>
+          )}
+        </div>
+      </div>
+      <TextArea value={ability.description} onChange={(v) => onUpdate({ description: v })} editMode={editMode} placeholder="What this ability does…" rows={2} />
+    </div>
+  );
+}
+
+function ItemCard({ item, onUpdate, onRemove, editMode }) {
+  const [open, setOpen] = useState(false);
+  const rarityColor = RARITY_COLORS[item.rarity] || 'zinc';
+  const abilities = item.abilities || [];
+
+  const addAbility = () => onUpdate({ abilities: [...abilities, { id: uid(), name: 'New Ability', usage: '', description: '' }] });
+  const updateAbility = (id, patch) => onUpdate({ abilities: abilities.map((a) => (a.id === id ? { ...a, ...patch } : a)) });
+  const removeAbility = (id) => onUpdate({ abilities: abilities.filter((a) => a.id !== id) });
+
+  return (
+    <Card className="p-3">
+      <div className="flex items-start justify-between gap-2">
+        <button onClick={() => setOpen(!open)} className="flex items-start gap-2 flex-1 min-w-0 text-left">
+          {open ? <ChevronDown className="w-3.5 h-3.5 text-zinc-500 shrink-0 mt-1" /> : <ChevronRight className="w-3.5 h-3.5 text-zinc-500 shrink-0 mt-1" />}
+          <div className="min-w-0 flex-1">
+            {editMode ? (
+              <input
+                value={item.name}
+                onChange={(e) => onUpdate({ name: e.target.value })}
+                onClick={(e) => e.stopPropagation()}
+                className="bg-zinc-800 border border-zinc-700 rounded px-2 py-0.5 text-sm font-semibold text-zinc-100 focus:outline-none focus:ring-1 focus:ring-emerald-500 w-full"
+              />
+            ) : (
+              <div className="text-sm font-semibold text-zinc-100">{item.name}</div>
+            )}
+            <div className="flex flex-wrap gap-1.5 mt-1">
+              <Badge color={rarityColor} size="xs">{item.rarity}</Badge>
+              {item.attunement && <Badge color="violet" size="xs">Attunement</Badge>}
+              {item.usage && <Badge color="amber" size="xs">{item.usage}</Badge>}
+              {abilities.length > 0 && <Badge color="sky" size="xs">{abilities.length} {abilities.length === 1 ? 'ability' : 'abilities'}</Badge>}
+            </div>
+          </div>
+        </button>
+        {editMode && (
+          <button onClick={onRemove} className="text-zinc-600 hover:text-red-400 shrink-0">
+            <Trash2 className="w-3.5 h-3.5" />
+          </button>
+        )}
+      </div>
+      {open && (
+        <div className="mt-3 pl-5 space-y-3">
+          {editMode && (
+            <div className="grid grid-cols-3 gap-2">
+              <div>
+                <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-0.5">Rarity</div>
+                <select
+                  value={item.rarity}
+                  onChange={(e) => onUpdate({ rarity: e.target.value })}
+                  className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-xs text-zinc-100 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                >
+                  {RARITIES.map((r) => <option key={r} value={r}>{r}</option>)}
+                </select>
+              </div>
+              <TextField label="Usage (overall item)" value={item.usage} onChange={(v) => onUpdate({ usage: v })} editMode={editMode} placeholder="1/Day, Recharge 5-6" />
+              <div>
+                <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-0.5">Attunement</div>
+                <button
+                  onClick={() => onUpdate({ attunement: !item.attunement })}
+                  className={`w-full flex items-center justify-center gap-1 rounded px-2 py-1 text-xs border ${item.attunement ? 'bg-violet-950 border-violet-700 text-violet-300' : 'bg-zinc-800 border-zinc-700 text-zinc-500'}`}
+                >
+                  {item.attunement ? <CheckCircle2 className="w-3.5 h-3.5" /> : <Circle className="w-3.5 h-3.5" />}
+                  {item.attunement ? 'Required' : 'Not required'}
+                </button>
+              </div>
+            </div>
+          )}
+
+          <div>
+            <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-1">Description / Lore</div>
+            <TextArea value={item.description} onChange={(v) => onUpdate({ description: v })} editMode={editMode} placeholder="Describe the item's appearance and general effect…" rows={3} />
+          </div>
+
+          <div>
+            <div className="flex items-center justify-between mb-1.5">
+              <div className="text-[10px] uppercase tracking-wider text-zinc-500">Abilities & Passives</div>
+              {editMode && (
+                <button onClick={addAbility} className="flex items-center gap-1 text-emerald-400 hover:text-emerald-300 text-xs">
+                  <Plus className="w-3 h-3" /> Add Ability
+                </button>
+              )}
+            </div>
+            {abilities.length === 0 ? (
+              <div className="text-xs text-zinc-600 italic">No separate abilities yet — good for artifacts with multiple distinct powers or passive traits.</div>
+            ) : (
+              <div className="space-y-2">
+                {abilities.map((a) => (
+                  <ItemAbilityRow key={a.id} ability={a} onUpdate={(patch) => updateAbility(a.id, patch)} onRemove={() => removeAbility(a.id)} editMode={editMode} />
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function HomebrewPowerCard({ power, onUpdate, onRemove, editMode }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <Card className="p-3">
+      <div className="flex items-start justify-between gap-2">
+        <button onClick={() => setOpen(!open)} className="flex items-start gap-2 flex-1 min-w-0 text-left">
+          {open ? <ChevronDown className="w-3.5 h-3.5 text-zinc-500 shrink-0 mt-1" /> : <ChevronRight className="w-3.5 h-3.5 text-zinc-500 shrink-0 mt-1" />}
+          <div className="min-w-0 flex-1">
+            {editMode ? (
+              <input
+                value={power.name}
+                onChange={(e) => onUpdate({ name: e.target.value })}
+                onClick={(e) => e.stopPropagation()}
+                className="bg-zinc-800 border border-zinc-700 rounded px-2 py-0.5 text-sm font-semibold text-zinc-100 focus:outline-none focus:ring-1 focus:ring-emerald-500 w-full"
+              />
+            ) : (
+              <div className="text-sm font-semibold text-zinc-100">{power.name}</div>
+            )}
+            <div className="flex flex-wrap gap-1.5 mt-1 text-[10px] text-zinc-500 font-mono">
+              {power.activationCost && <span>{power.activationCost}</span>}
+              {power.range && <span>· {power.range}</span>}
+              {power.saveDC && <span>· DC {power.saveDC}</span>}
+            </div>
+          </div>
+        </button>
+        {editMode && (
+          <button onClick={onRemove} className="text-zinc-600 hover:text-red-400 shrink-0">
+            <Trash2 className="w-3.5 h-3.5" />
+          </button>
+        )}
+      </div>
+      {open && (
+        <div className="mt-3 pl-5 space-y-2">
+          {editMode && (
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+              <TextField label="Activation Cost" value={power.activationCost} onChange={(v) => onUpdate({ activationCost: v })} editMode={editMode} placeholder="1 Action" />
+              <TextField label="Target / Range" value={power.range} onChange={(v) => onUpdate({ range: v })} editMode={editMode} placeholder="60 ft, single target" />
+              <TextField label="Save DC" value={power.saveDC} onChange={(v) => onUpdate({ saveDC: v })} editMode={editMode} placeholder="17 (DEX)" />
+              <TextField label="Damage / Effect" value={power.formula} onChange={(v) => onUpdate({ formula: v })} editMode={editMode} placeholder="6d10 fire" />
+            </div>
+          )}
+          {!editMode && power.formula && (
+            <div className="text-xs font-mono text-emerald-400 bg-emerald-950/30 border border-emerald-900 rounded px-2 py-1 inline-block">{power.formula}</div>
+          )}
+          <TextArea value={power.description} onChange={(v) => onUpdate({ description: v })} editMode={editMode} placeholder="Effect description…" rows={3} />
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function ItemsTab({ character, updateCharacter, editMode }) {
+  const items = character.items || [];
+  const powers = character.homebrewPowers || [];
+
+  const addItem = () => updateCharacter({ items: [...items, { id: uid(), name: 'New Item', attunement: false, rarity: 'Common', usage: '', description: '', abilities: [] }] });
+  const updateItem = (id, patch) => updateCharacter({ items: items.map((i) => (i.id === id ? { ...i, ...patch } : i)) });
+  const removeItem = (id) => updateCharacter({ items: items.filter((i) => i.id !== id) });
+
+  const addPower = () => updateCharacter({ homebrewPowers: [...powers, { id: uid(), name: 'New Power', activationCost: '', range: '', saveDC: '', formula: '', description: '' }] });
+  const updatePower = (id, patch) => updateCharacter({ homebrewPowers: powers.map((p) => (p.id === id ? { ...p, ...patch } : p)) });
+  const removePower = (id) => updateCharacter({ homebrewPowers: powers.filter((p) => p.id !== id) });
+
+  return (
+    <div className="space-y-3">
+      <Collapsible
+        title="Items & Equipment"
+        defaultOpen
+        badge={items.length > 0 && <span className="text-[10px] text-zinc-600 font-mono">({items.length})</span>}
+        right={editMode && <IconButton icon={Plus} label="Add Item" onClick={(e) => { e.stopPropagation(); addItem(); }} variant="primary" />}
+      >
+        {items.length === 0 ? (
+          <div className="text-xs text-zinc-600 italic">No items yet.</div>
+        ) : (
+          <div className="space-y-2">
+            {items.map((i) => <ItemCard key={i.id} item={i} onUpdate={(p) => updateItem(i.id, p)} onRemove={() => removeItem(i.id)} editMode={editMode} />)}
+          </div>
+        )}
+      </Collapsible>
+
+      <Collapsible
+        title="Homebrew Powers"
+        defaultOpen
+        badge={powers.length > 0 && <span className="text-[10px] text-zinc-600 font-mono">({powers.length})</span>}
+        right={editMode && <IconButton icon={Plus} label="Add Power" onClick={(e) => { e.stopPropagation(); addPower(); }} variant="primary" />}
+      >
+        {powers.length === 0 ? (
+          <div className="text-xs text-zinc-600 italic">No homebrew powers yet.</div>
+        ) : (
+          <div className="space-y-2">
+            {powers.map((p) => <HomebrewPowerCard key={p.id} power={p} onUpdate={(patch) => updatePower(p.id, patch)} onRemove={() => removePower(p.id)} editMode={editMode} />)}
+          </div>
+        )}
+      </Collapsible>
+    </div>
+  );
+}
+
+// ============================================================
+// TAB: CUSTOM FIELDS & DYNAMIC TABS
+// ============================================================
+
+function DetailsTab({ character, updateCharacter, editMode }) {
+  const fields = character.customFields || [];
+
+  const addField = () => updateCharacter({ customFields: [...fields, { id: uid(), label: 'New Field', value: '' }] });
+  const updateField = (id, patch) => updateCharacter({ customFields: fields.map((f) => (f.id === id ? { ...f, ...patch } : f)) });
+  const removeField = (id) => updateCharacter({ customFields: fields.filter((f) => f.id !== id) });
+
+  return (
+    <div className="space-y-3">
+      <Collapsible
+        title="Key-Value Fields"
+        defaultOpen
+        right={editMode && <IconButton icon={Plus} label="Add Field" onClick={(e) => { e.stopPropagation(); addField(); }} variant="primary" />}
+      >
+        {fields.length === 0 ? (
+          <div className="text-xs text-zinc-600 italic">No custom fields yet. Great for bonds, factions, ship stats, downtime notes…</div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            {fields.map((f) => (
+              <div key={f.id} className="bg-zinc-950 border border-zinc-800 rounded-lg p-2 flex items-start gap-2">
+                <div className="flex-1 min-w-0">
+                  {editMode ? (
+                    <>
+                      <input
+                        value={f.label}
+                        onChange={(e) => updateField(f.id, { label: e.target.value })}
+                        className="w-full bg-transparent text-[10px] uppercase tracking-wider text-zinc-500 focus:outline-none mb-0.5"
+                      />
+                      <input
+                        value={f.value}
+                        onChange={(e) => updateField(f.id, { value: e.target.value })}
+                        className="w-full bg-zinc-800 border border-zinc-700 rounded px-1.5 py-0.5 text-sm text-zinc-100 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                      />
+                    </>
+                  ) : (
+                    <>
+                      <div className="text-[10px] uppercase tracking-wider text-zinc-500">{f.label}</div>
+                      <div className="text-sm text-zinc-200">{f.value || <span className="italic text-zinc-600">—</span>}</div>
+                    </>
+                  )}
+                </div>
+                {editMode && (
+                  <button onClick={() => removeField(f.id)} className="text-zinc-600 hover:text-red-400">
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </Collapsible>
+    </div>
+  );
+}
+
+// Renders a single user-created custom category as its own top-level tab —
+// a freeform space for lore, faction standings, ship stats, or anything
+// else the player wants. Kept intentionally simple (name + free text) so
+// it can hold whatever structure the player invents, rather than the app
+// guessing at a schema for content it can't anticipate.
+function CustomEntryCard({ entry, onUpdate, onRemove, editMode }) {
+  const [open, setOpen] = useState(true);
+  return (
+    <Card className="p-3">
+      <div className="flex items-start justify-between gap-2">
+        <button onClick={() => setOpen(!open)} className="flex items-start gap-2 flex-1 min-w-0 text-left">
+          {open ? <ChevronDown className="w-3.5 h-3.5 text-zinc-500 shrink-0 mt-1" /> : <ChevronRight className="w-3.5 h-3.5 text-zinc-500 shrink-0 mt-1" />}
+          {editMode ? (
+            <input
+              value={entry.title}
+              onChange={(e) => onUpdate({ title: e.target.value })}
+              onClick={(e) => e.stopPropagation()}
+              placeholder="Entry title"
+              className="bg-zinc-800 border border-zinc-700 rounded px-2 py-0.5 text-sm font-semibold text-zinc-100 focus:outline-none focus:ring-1 focus:ring-emerald-500 flex-1 min-w-0"
+            />
+          ) : (
+            <div className="text-sm font-semibold text-zinc-100">{entry.title || 'Untitled Entry'}</div>
+          )}
+        </button>
+        {editMode && (
+          <button onClick={onRemove} className="text-zinc-600 hover:text-red-400 shrink-0">
+            <Trash2 className="w-3.5 h-3.5" />
+          </button>
+        )}
+      </div>
+      {open && (
+        <div className="mt-2 pl-5">
+          <TextArea value={entry.content} onChange={(v) => onUpdate({ content: v })} editMode={editMode} placeholder="Write anything here — lore, notes, stats, whatever this entry needs." rows={4} />
+        </div>
+      )}
+    </Card>
+  );
+}
+
+// A user-created category can hold as many separate entries as the player
+// wants — each its own title and freeform text — instead of one shared box,
+// so adding a new piece of lore never requires creating a whole new tab.
+function CustomCategoryTab({ tab, onUpdate, editMode }) {
+  const entries = tab.entries || [];
+
+  // One-time migration: older tabs only had a single "content" string.
+  // Fold it into the new entries list the first time this renders so
+  // nothing written before this feature existed gets lost.
+  useEffect(() => {
+    if (tab.content && entries.length === 0) {
+      onUpdate({ content: '', entries: [{ id: uid(), title: tab.name || 'Notes', content: tab.content }] });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab.id]);
+
+  const addEntry = () => onUpdate({ entries: [...entries, { id: uid(), title: 'New Entry', content: '' }] });
+  const updateEntry = (id, patch) => onUpdate({ entries: entries.map((e) => (e.id === id ? { ...e, ...patch } : e)) });
+  const removeEntry = (id) => onUpdate({ entries: entries.filter((e) => e.id !== id) });
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <p className="text-xs text-zinc-600">Add as many entries as you want in this category — lore, bonds, notes, whatever fits.</p>
+        {editMode && (
+          <button onClick={addEntry} className="flex items-center gap-1.5 bg-violet-700 hover:bg-violet-600 text-white text-xs font-semibold px-3 py-1.5 rounded-lg shrink-0">
+            <Plus className="w-3.5 h-3.5" /> Add Entry
+          </button>
+        )}
+      </div>
+      {entries.length === 0 ? (
+        <Card className="p-4 text-center">
+          <div className="text-xs text-zinc-600 italic">No entries yet in this category.</div>
+          {editMode && (
+            <button onClick={addEntry} className="mt-3 flex items-center gap-1.5 mx-auto bg-violet-700 hover:bg-violet-600 text-white text-xs font-semibold px-3 py-1.5 rounded-lg">
+              <Plus className="w-3.5 h-3.5" /> Add Entry
+            </button>
+          )}
+        </Card>
+      ) : (
+        <div className="space-y-2">
+          {entries.map((e) => (
+            <CustomEntryCard key={e.id} entry={e} onUpdate={(patch) => updateEntry(e.id, patch)} onRemove={() => removeEntry(e.id)} editMode={editMode} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============================================================
+// CHARACTER EDITOR SHELL
+// ============================================================
+
+const EDITOR_TABS = [
+  { key: 'stats', label: 'Stats & Defenses', icon: Shield },
+  { key: 'actions', label: 'Actions & Powers', icon: Swords },
+  { key: 'items', label: 'Items & Homebrew', icon: Package },
+  { key: 'details', label: 'Details', icon: Layers },
+];
+
+function CharacterEditor({ character, onUpdate, onBack, onExport, onDuplicate, onDelete }) {
+  const [editMode, setEditMode] = useState(false);
+  const [activeTab, setActiveTab] = useState('stats');
+
+  const updateCharacter = (patch) => {
+    onUpdate({ ...character, ...patch, lastEdited: Date.now() });
+  };
+
+  const customTabs = character.customTabs || [];
+
+  const addCustomTab = () => {
+    const newTab = { id: uid(), name: 'New Category', content: '', entries: [] };
+    updateCharacter({ customTabs: [...customTabs, newTab] });
+    setActiveTab(`custom:${newTab.id}`);
+  };
+  const updateCustomTab = (id, patch) => updateCharacter({ customTabs: customTabs.map((t) => (t.id === id ? { ...t, ...patch } : t)) });
+  const removeCustomTab = (id) => {
+    updateCharacter({ customTabs: customTabs.filter((t) => t.id !== id) });
+    if (activeTab === `custom:${id}`) setActiveTab('stats');
+  };
+
+  const activeCustomTab = activeTab.startsWith('custom:') ? customTabs.find((t) => t.id === activeTab.slice(7)) : null;
+
+  return (
+    <div className="min-h-screen bg-zinc-950">
+      <div className="max-w-5xl mx-auto">
+        <div className="flex items-center justify-between px-4 pt-3 no-print">
+          <button onClick={onBack} className="flex items-center gap-1.5 text-xs text-zinc-500 hover:text-zinc-200">
+            <ChevronRight className="w-3.5 h-3.5 rotate-180" /> Back to Vault
+          </button>
+          <div className="flex items-center gap-1.5">
+            <IconButton icon={Printer} label="Print" onClick={() => window.print()} />
+            <IconButton icon={Copy} label="Duplicate" onClick={onDuplicate} />
+            <IconButton icon={Download} label="Export" onClick={onExport} />
+            <IconButton icon={Trash2} label="Delete" onClick={onDelete} variant="danger" />
+          </div>
+        </div>
+
+        <div className="no-print">
+          <QuickCombatBar character={character} updateCharacter={updateCharacter} editMode={editMode} setEditMode={setEditMode} />
+        </div>
+
+        {/* Role & Tags row */}
+        <div className="px-4 py-3 flex flex-wrap items-center gap-3 border-b border-zinc-900 no-print">
+          <TextField label={null} value={character.role} onChange={(v) => updateCharacter({ role: v })} editMode={editMode} placeholder="Role / Class (e.g. Boss NPC, Level 12 Warlock)" className="min-w-[220px]" />
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <TagIcon className="w-3.5 h-3.5 text-zinc-600" />
+            <TagInput
+              tags={character.tags}
+              onAdd={(t) => updateCharacter({ tags: [...character.tags, t] })}
+              onRemove={(t) => updateCharacter({ tags: character.tags.filter((x) => x !== t) })}
+              placeholder="Faction: Obsidian Order"
+              color="emerald"
+            />
+          </div>
+        </div>
+
+        {/* Tab nav: built-in tabs, then every user-created custom category,
+            then a "+" to add another. Custom tab names are directly
+            editable and removable right in the bar. */}
+        <div className="px-4 pt-3 flex items-center gap-1 overflow-x-auto no-print">
+          {EDITOR_TABS.map((t) => (
+            <button
+              key={t.key}
+              onClick={() => setActiveTab(t.key)}
+              className={`flex items-center gap-1.5 px-3 py-2 rounded-t-lg text-xs font-semibold whitespace-nowrap border-b-2 transition-colors shrink-0 ${
+                activeTab === t.key ? 'border-emerald-500 text-emerald-400 bg-zinc-900' : 'border-transparent text-zinc-500 hover:text-zinc-300'
+              }`}
+            >
+              <t.icon className="w-3.5 h-3.5" />
+              {t.label}
+            </button>
+          ))}
+
+          {customTabs.length > 0 && <div className="w-px h-5 bg-zinc-800 shrink-0 mx-1" />}
+
+          {customTabs.map((t) => {
+            const tabKey = `custom:${t.id}`;
+            const isActive = activeTab === tabKey;
+            return (
+              <button
+                key={t.id}
+                onClick={() => setActiveTab(tabKey)}
+                className={`flex items-center gap-1.5 px-3 py-2 rounded-t-lg text-xs font-semibold whitespace-nowrap border-b-2 transition-colors shrink-0 ${
+                  isActive ? 'border-violet-500 text-violet-300 bg-zinc-900' : 'border-transparent text-zinc-500 hover:text-zinc-300'
+                }`}
+              >
+                <Layers className="w-3.5 h-3.5" />
+                {editMode ? (
+                  <input
+                    value={t.name}
+                    onChange={(e) => updateCustomTab(t.id, { name: e.target.value })}
+                    onClick={(e) => e.stopPropagation()}
+                    className="bg-transparent focus:outline-none w-24"
+                  />
+                ) : (
+                  t.name
+                )}
+                {editMode && (
+                  <span
+                    onClick={(e) => { e.stopPropagation(); removeCustomTab(t.id); }}
+                    className="hover:text-red-400"
+                    title="Remove this category"
+                  >
+                    <X className="w-3 h-3" />
+                  </span>
+                )}
+              </button>
+            );
+          })}
+
+          {editMode && (
+            <button
+              onClick={addCustomTab}
+              title="Add a custom category tab"
+              className="flex items-center gap-1 px-2.5 py-2 rounded-t-lg text-xs font-semibold text-zinc-600 hover:text-violet-300 border-b-2 border-transparent shrink-0"
+            >
+              <Plus className="w-3.5 h-3.5" /> Category
+            </button>
+          )}
+        </div>
+
+        <div className="px-4 pb-8 pt-3 no-print">
+          {activeTab === 'stats' && <StatsAndDefensesTab character={character} updateCharacter={updateCharacter} editMode={editMode} />}
+          {activeTab === 'actions' && <ActionsTab character={character} updateCharacter={updateCharacter} editMode={editMode} />}
+          {activeTab === 'items' && <ItemsTab character={character} updateCharacter={updateCharacter} editMode={editMode} />}
+          {activeTab === 'details' && <DetailsTab character={character} updateCharacter={updateCharacter} editMode={editMode} />}
+          {activeCustomTab && <CustomCategoryTab tab={activeCustomTab} onUpdate={(patch) => updateCustomTab(activeCustomTab.id, patch)} editMode={editMode} />}
+        </div>
+
+        {/* Print-only composite: stacks every section, read-only, so a single
+            print/PDF export captures the whole stat block instead of just
+            whichever tab happens to be open on screen. */}
+        <div className="print-only px-4 pb-8 pt-3 space-y-3">
+          <div className="border-b border-zinc-300 pb-3 mb-1">
+            <h1 className="text-2xl font-bold">{character.name}</h1>
+            {(character.subtitle || character.role) && <p className="text-sm text-zinc-600">{character.subtitle || character.role}</p>}
+            <div className="flex gap-4 mt-1 text-sm font-mono">
+              <span>HP {character.hp.max}{character.hp.temp > 0 ? ` (+${character.hp.temp} temp)` : ''}</span>
+              <span>AC {character.ac}</span>
+              <span>Speed {character.speed}</span>
+              <span>Init {fmtMod(character.initiativeMod)}</span>
+              <span>Prof {fmtMod(character.proficiencyBonus)}</span>
+            </div>
+          </div>
+          <StatsAndDefensesTab character={character} updateCharacter={() => {}} editMode={false} />
+          <ActionsTab character={character} updateCharacter={() => {}} editMode={false} />
+          <ItemsTab character={character} updateCharacter={() => {}} editMode={false} />
+          <DetailsTab character={character} updateCharacter={() => {}} editMode={false} />
+          {customTabs.map((t) => (
+            <div key={t.id}>
+              <h2 className="text-base font-bold border-b border-zinc-300 pb-1 mb-2">{t.name}</h2>
+              <CustomCategoryTab tab={t} onUpdate={() => {}} editMode={false} />
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
+// VAULT VIEW (grid/list, filter, sort)
+// ============================================================
+
+function CharacterCard({ character, onOpen, onDuplicate, onExport, onDelete, view }) {
+  const pct = character.hp.max > 0 ? clamp((character.hp.current / character.hp.max) * 100, 0, 100) : 0;
+  const hpColor = pct > 50 ? 'bg-emerald-500' : pct > 25 ? 'bg-amber-500' : 'bg-red-500';
+
+  if (view === 'list') {
+    return (
+      <div onClick={onOpen} className="flex items-center gap-3 bg-zinc-900 border border-zinc-800 hover:border-zinc-700 rounded-lg px-3 py-2.5 cursor-pointer transition-colors">
+        <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-zinc-800 to-zinc-900 border border-zinc-700 flex items-center justify-center shrink-0 overflow-hidden">
+          <Avatar character={character} className="w-9 h-9 rounded-lg" iconClassName="w-4 h-4 text-emerald-400" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="text-sm font-semibold text-zinc-100 truncate">{character.name}</div>
+          <div className="text-[11px] text-zinc-500 truncate">{character.role || character.subtitle}</div>
+        </div>
+        <div className="hidden sm:flex items-center gap-3 text-xs font-mono text-zinc-400 shrink-0">
+          <span className="flex items-center gap-1"><Heart className="w-3 h-3 text-red-400" />{character.hp.current}/{character.hp.max}</span>
+          <span className="flex items-center gap-1"><Shield className="w-3 h-3 text-sky-400" />{character.ac}</span>
+        </div>
+        <div className="hidden md:flex gap-1 flex-wrap max-w-[200px]">
+          {character.tags.slice(0, 2).map((t) => <Badge key={t} size="xs">{t}</Badge>)}
+        </div>
+        <div className="flex items-center gap-0.5 shrink-0" onClick={(e) => e.stopPropagation()}>
+          <IconButton icon={Copy} onClick={onDuplicate} label="" />
+          <IconButton icon={Download} onClick={onExport} label="" />
+          <IconButton icon={Trash2} onClick={onDelete} label="" variant="danger" />
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div onClick={onOpen} className="bg-zinc-900 border border-zinc-800 hover:border-zinc-700 rounded-lg p-3.5 cursor-pointer transition-colors flex flex-col gap-2.5">
+      <div className="flex items-start justify-between">
+        <div className="flex items-center gap-2.5 min-w-0">
+          <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-zinc-800 to-zinc-900 border border-zinc-700 flex items-center justify-center shrink-0 overflow-hidden">
+            <Avatar character={character} className="w-10 h-10 rounded-lg" iconClassName="w-5 h-5 text-emerald-400" />
+          </div>
+          <div className="min-w-0">
+            <div className="text-sm font-semibold text-zinc-100 truncate">{character.name}</div>
+            <div className="text-[11px] text-zinc-500 truncate">{character.role || character.subtitle || '—'}</div>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <div className="flex items-center justify-between text-[11px] font-mono text-zinc-400 mb-1">
+          <span>HP {character.hp.current}/{character.hp.max}</span>
+          <span className="flex items-center gap-1"><Shield className="w-3 h-3 text-sky-400" />{character.ac}</span>
+        </div>
+        <div className="w-full h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+          <div className={`h-full ${hpColor}`} style={{ width: `${pct}%` }} />
+        </div>
+      </div>
+
+      {character.tags.length > 0 && (
+        <div className="flex flex-wrap gap-1">
+          {character.tags.slice(0, 3).map((t) => <Badge key={t} size="xs">{t}</Badge>)}
+          {character.tags.length > 3 && <span className="text-[10px] text-zinc-600">+{character.tags.length - 3}</span>}
+        </div>
+      )}
+
+      <div className="flex items-center justify-between pt-2 border-t border-zinc-800" onClick={(e) => e.stopPropagation()}>
+        <span className="text-[10px] text-zinc-600">{new Date(character.lastEdited).toLocaleDateString()}</span>
+        <div className="flex items-center gap-0.5">
+          <IconButton icon={Copy} onClick={onDuplicate} label="" />
+          <IconButton icon={Download} onClick={onExport} label="" />
+          <IconButton icon={Trash2} onClick={onDelete} label="" variant="danger" />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ImportModal({ onClose, onImport, existingCharacters }) {
+  const [error, setError] = useState('');
+  const [showSchema, setShowSchema] = useState(false);
+  const [pendingImport, setPendingImport] = useState(null); // { chars, collisions: [{incoming, existing}] }
+  const fileRef = useRef(null);
+
+  const parseFile = (file) => {
+    setError('');
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const data = JSON.parse(e.target.result);
+        // Accept three shapes: a single character, a bare array of characters,
+        // or a full vault backup { schemaVersion, characters: [...] }.
+        let chars;
+        if (Array.isArray(data)) {
+          chars = data;
+        } else if (data && Array.isArray(data.characters)) {
+          chars = data.characters;
+        } else {
+          chars = [data];
+        }
+        if (chars.length === 0) throw new Error('No characters found in file.');
+        for (const c of chars) {
+          if (!isPlainObject(c) || !asString(c.name)) throw new Error('Missing required field: "name"');
+        }
+        const normalized = chars.map(normalizeImportedCharacter);
+
+        const collisions = normalized
+          .map((incoming) => ({ incoming, existing: existingCharacters.find((e) => e.name === incoming.name) }))
+          .filter((pair) => pair.existing);
+
+        if (collisions.length > 0) {
+          setPendingImport({ chars: normalized, collisions });
+        } else {
+          onImport(normalized);
+          onClose();
+        }
+      } catch (err) {
+        setError('Could not parse file: ' + err.message);
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  const resolveImport = (mode) => {
+    if (!pendingImport) return;
+    const collisionNames = new Set(pendingImport.collisions.map((c) => c.existing.id));
+    if (mode === 'replace') {
+      onImport(pendingImport.chars, collisionNames);
+    } else {
+      // keep both: rename incoming duplicates so nothing is overwritten
+      const renamed = pendingImport.chars.map((c) => {
+        const isCollision = pendingImport.collisions.some((col) => col.incoming.id === c.id);
+        return isCollision ? { ...c, name: c.name + ' (Imported)' } : c;
+      });
+      onImport(renamed);
+    }
+    setPendingImport(null);
+    onClose();
+  };
+
+  if (pendingImport) {
+    return (
+      <Modal title="Name Conflicts Found" onClose={() => setPendingImport(null)} wide>
+        <div className="space-y-4">
+          <p className="text-sm text-zinc-300">
+            {pendingImport.collisions.length} imported {pendingImport.collisions.length === 1 ? 'character shares' : 'characters share'} a name with an existing vault entry:
+          </p>
+          <ul className="space-y-1">
+            {pendingImport.collisions.map((c) => (
+              <li key={c.incoming.id} className="text-xs text-amber-300 bg-amber-950 border border-amber-900 rounded px-2 py-1">
+                {c.incoming.name}
+              </li>
+            ))}
+          </ul>
+          <div className="flex items-center gap-2 pt-2">
+            <button onClick={() => resolveImport('replace')} className="flex-1 bg-red-700 hover:bg-red-600 text-white text-sm font-semibold px-3 py-2 rounded-lg">
+              Overwrite Existing
+            </button>
+            <button onClick={() => resolveImport('keep-both')} className="flex-1 bg-emerald-700 hover:bg-emerald-600 text-white text-sm font-semibold px-3 py-2 rounded-lg">
+              Keep Both (Rename Import)
+            </button>
+          </div>
+        </div>
+      </Modal>
+    );
+  }
+
+  return (
+    <Modal title="Import Character(s)" onClose={onClose} wide>
+      <div className="space-y-4">
+        <div
+          onDragOver={(e) => e.preventDefault()}
+          onDrop={(e) => { e.preventDefault(); if (e.dataTransfer.files[0]) parseFile(e.dataTransfer.files[0]); }}
+          onClick={() => fileRef.current?.click()}
+          className="border-2 border-dashed border-zinc-700 hover:border-emerald-600 rounded-lg py-10 flex flex-col items-center justify-center gap-2 cursor-pointer text-zinc-500 hover:text-emerald-400 transition-colors"
+        >
+          <Upload className="w-8 h-8" />
+          <span className="text-sm">Drop a .json file here, or click to browse</span>
+          <span className="text-[10px] text-zinc-600">Accepts a single character, a list, or a full vault backup</span>
+          <input ref={fileRef} type="file" accept=".json,application/json" className="hidden" onChange={(e) => e.target.files[0] && parseFile(e.target.files[0])} />
+        </div>
+        {error && <div className="text-xs text-red-400 bg-red-950 border border-red-900 rounded px-3 py-2">{error}</div>}
+
+        <button onClick={() => setShowSchema(!showSchema)} className="flex items-center gap-1.5 text-xs text-zinc-400 hover:text-zinc-200">
+          <HelpCircle className="w-3.5 h-3.5" /> {showSchema ? 'Hide' : 'Show'} JSON schema (for humans or AI assistants)
+        </button>
+        {showSchema && (
+          <div className="space-y-2">
+            <p className="text-[11px] text-zinc-500">
+              The comments below (<code className="text-zinc-400">// like this</code>) are explanatory and not valid JSON — an AI generating a real character file should omit them. Only <code className="text-zinc-400">"name"</code> is required; everything else is optional and defaults sensibly.
+            </p>
+            <pre className="bg-zinc-950 border border-zinc-800 rounded-lg p-3 text-[10px] font-mono text-zinc-400 overflow-x-auto max-h-64">
+              {SCHEMA_SNIPPET}
+            </pre>
+            <div className="flex items-center gap-2">
+              <CopyButton text={SCHEMA_SNIPPET} label="Copy Schema" />
+              <CopyButton text={AI_FILL_PROMPT} label="Copy AI Prompt" icon={Wand2} />
+            </div>
+          </div>
+        )}
+      </div>
+    </Modal>
+  );
+}
+
+function VaultView({ characters, setCharacters, onOpen, onDeleteCharacter }) {
+  const [search, setSearch] = useState('');
+  const [view, setView] = useState('grid');
+  const [sortBy, setSortBy] = useState('lastEdited');
+  const [activeTagFilters, setActiveTagFilters] = useState([]);
+  const [showImport, setShowImport] = useState(false);
+  const [showFilters, setShowFilters] = useState(false);
+
+  const allTags = useMemo(() => {
+    const s = new Set();
+    characters.forEach((c) => c.tags.forEach((t) => s.add(t)));
+    return Array.from(s).sort();
+  }, [characters]);
+
+  const filtered = useMemo(() => {
+    let list = characters.filter((c) => {
+      const matchesSearch = !search || c.name.toLowerCase().includes(search.toLowerCase()) || c.role.toLowerCase().includes(search.toLowerCase());
+      const matchesTags = activeTagFilters.length === 0 || activeTagFilters.every((t) => c.tags.includes(t));
+      return matchesSearch && matchesTags;
+    });
+    list.sort((a, b) => {
+      if (sortBy === 'name') return a.name.localeCompare(b.name);
+      if (sortBy === 'lastEdited') return b.lastEdited - a.lastEdited;
+      if (sortBy === 'hp') return b.hp.max - a.hp.max;
+      return 0;
+    });
+    return list;
+  }, [characters, search, activeTagFilters, sortBy]);
+
+  const createNew = () => {
+    const c = createBlankCharacter();
+    setCharacters([c, ...characters]);
+    onOpen(c.id);
+  };
+
+  const duplicate = (id) => {
+    const orig = characters.find((c) => c.id === id);
+    if (!orig) return;
+    const copy = { ...cloneCharacterWithFreshIds(orig), name: orig.name + ' (Copy)' };
+    setCharacters([copy, ...characters]);
+  };
+
+  const exportOne = (id) => {
+    const c = characters.find((ch) => ch.id === id);
+    if (!c) return;
+    downloadJson({ ...c, schemaVersion: SCHEMA_VERSION }, `${c.name.replace(/[^a-z0-9]/gi, '_')}.json`);
+  };
+
+  const exportAll = () => {
+    downloadJson(
+      { schemaVersion: SCHEMA_VERSION, exportedAt: new Date().toISOString(), characters },
+      `homebrew_vault_backup_${new Date().toISOString().slice(0, 10)}.json`
+    );
+  };
+
+  const deleteOne = (id) => {
+    onDeleteCharacter(id);
+  };
+
+  const toggleTagFilter = (t) => {
+    setActiveTagFilters((prev) => (prev.includes(t) ? prev.filter((x) => x !== t) : [...prev, t]));
+  };
+
+  return (
+    <div className="min-h-screen bg-zinc-950">
+      <div className="max-w-6xl mx-auto px-4 py-6">
+        <div className="flex items-center justify-between mb-5 flex-wrap gap-3">
+          <div className="flex items-center gap-2.5">
+            <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-emerald-600 to-violet-600 flex items-center justify-center">
+              <BookOpen className="w-5 h-5 text-white" />
+            </div>
+            <div>
+              <h1 className="text-lg font-bold text-zinc-100 leading-tight">Homebrew Vault</h1>
+              <p className="text-[11px] text-zinc-500">{characters.length} {characters.length === 1 ? 'entry' : 'entries'} saved locally</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <IconButton icon={Upload} label="Import" onClick={() => setShowImport(true)} />
+            <IconButton icon={Download} label="Export Vault" onClick={exportAll} />
+            <button onClick={createNew} className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-semibold px-3.5 py-2 rounded-lg transition-colors">
+              <Plus className="w-4 h-4" /> New Character
+            </button>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2 mb-4 flex-wrap">
+          <div className="relative flex-1 min-w-[200px]">
+            <Search className="w-4 h-4 text-zinc-600 absolute left-2.5 top-1/2 -translate-y-1/2" />
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search by name or role…"
+              className="w-full bg-zinc-900 border border-zinc-800 rounded-lg pl-8 pr-3 py-2 text-sm text-zinc-100 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+            />
+          </div>
+          <select
+            value={sortBy}
+            onChange={(e) => setSortBy(e.target.value)}
+            className="bg-zinc-900 border border-zinc-800 rounded-lg px-2.5 py-2 text-xs text-zinc-300 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+          >
+            <option value="lastEdited">Sort: Last Edited</option>
+            <option value="name">Sort: Name</option>
+            <option value="hp">Sort: Max HP</option>
+          </select>
+          <button
+            onClick={() => setShowFilters(!showFilters)}
+            className={`flex items-center gap-1.5 px-2.5 py-2 rounded-lg text-xs font-medium border ${activeTagFilters.length > 0 ? 'bg-emerald-950 border-emerald-800 text-emerald-400' : 'bg-zinc-900 border-zinc-800 text-zinc-400'}`}
+          >
+            <Filter className="w-3.5 h-3.5" /> Tags {activeTagFilters.length > 0 && `(${activeTagFilters.length})`}
+          </button>
+          <div className="flex items-center bg-zinc-900 border border-zinc-800 rounded-lg overflow-hidden">
+            <button onClick={() => setView('grid')} className={`p-2 ${view === 'grid' ? 'bg-zinc-700 text-white' : 'text-zinc-500'}`}><Grid3x3 className="w-4 h-4" /></button>
+            <button onClick={() => setView('list')} className={`p-2 ${view === 'list' ? 'bg-zinc-700 text-white' : 'text-zinc-500'}`}><List className="w-4 h-4" /></button>
+          </div>
+        </div>
+
+        {showFilters && allTags.length > 0 && (
+          <div className="mb-4 p-3 bg-zinc-900 border border-zinc-800 rounded-lg">
+            <ChipSelect options={allTags} selected={activeTagFilters} onToggle={toggleTagFilter} color="emerald" />
+          </div>
+        )}
+
+        {filtered.length === 0 ? (
+          <div className="text-center py-20 text-zinc-600">
+            <FolderOpen className="w-10 h-10 mx-auto mb-3 opacity-50" />
+            <p className="text-sm">{characters.length === 0 ? 'No characters yet. Create one or import a JSON file to get started.' : 'No entries match your search or filters.'}</p>
+          </div>
+        ) : (
+          <div className={view === 'grid' ? 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3' : 'flex flex-col gap-2'}>
+            {filtered.map((c) => (
+              <CharacterCard
+                key={c.id}
+                character={c}
+                view={view}
+                onOpen={() => onOpen(c.id)}
+                onDuplicate={() => duplicate(c.id)}
+                onExport={() => exportOne(c.id)}
+                onDelete={() => deleteOne(c.id)}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+
+      {showImport && (
+        <ImportModal
+          onClose={() => setShowImport(false)}
+          existingCharacters={characters}
+          onImport={(newChars, replaceIds) => {
+            if (replaceIds && replaceIds.size > 0) {
+              setCharacters([...newChars, ...characters.filter((c) => !replaceIds.has(c.id))]);
+            } else {
+              setCharacters([...newChars, ...characters]);
+            }
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+// ============================================================
+// ROOT APP
+// ============================================================
+
+function HomebrewVaultApp() {
+  const [characters, setCharacters] = useState(() => loadVault());
+  const [activeId, setActiveId] = useState(() => {
+    try {
+      const savedId = localStorage.getItem(LAST_OPEN_KEY);
+      // Only restore if that character still exists — avoids reopening a
+      // stale or since-deleted entry.
+      const vault = loadVault();
+      if (savedId && vault.some((c) => c.id === savedId)) return savedId;
+    } catch (e) { /* storage unavailable */ }
+    return null;
+  });
+  const [storageError, setStorageError] = useState(null);
+
+  useEffect(() => {
+    const result = saveVault(characters);
+    if (!result.ok) {
+      setStorageError('Could not save to local storage — your browser storage may be full or disabled. Export your vault now to avoid losing changes.');
+    } else {
+      setStorageError(null);
+    }
+  }, [characters]);
+
+  useEffect(() => {
+    try {
+      if (activeId) localStorage.setItem(LAST_OPEN_KEY, activeId);
+      else localStorage.removeItem(LAST_OPEN_KEY);
+    } catch (e) { /* storage unavailable */ }
+  }, [activeId]);
+
+  const activeCharacter = characters.find((c) => c.id === activeId);
+
+  const updateActiveCharacter = (updated) => {
+    setCharacters(characters.map((c) => (c.id === updated.id ? updated : c)));
+  };
+
+  const exportActive = () => {
+    if (!activeCharacter) return;
+    downloadJson({ ...activeCharacter, schemaVersion: SCHEMA_VERSION }, `${activeCharacter.name.replace(/[^a-z0-9]/gi, '_')}.json`);
+  };
+
+  const duplicateActive = () => {
+    if (!activeCharacter) return;
+    const copy = { ...cloneCharacterWithFreshIds(activeCharacter), name: activeCharacter.name + ' (Copy)' };
+    setCharacters([copy, ...characters]);
+    setActiveId(copy.id);
+  };
+
+  // Undo-aware delete: removes immediately but keeps the character + its
+  // original index around briefly so a misclick can be reversed.
+  const [pendingDelete, setPendingDelete] = useState(null); // { character, index }
+
+  const deleteCharacterWithUndo = (id) => {
+    const index = characters.findIndex((c) => c.id === id);
+    if (index === -1) return;
+    const removed = characters[index];
+    setCharacters(characters.filter((c) => c.id !== id));
+    if (activeId === id) setActiveId(null);
+    setPendingDelete({ character: removed, index });
+  };
+
+  const undoDelete = () => {
+    if (!pendingDelete) return;
+    setCharacters((prev) => {
+      const next = [...prev];
+      const insertAt = Math.min(pendingDelete.index, next.length);
+      next.splice(insertAt, 0, pendingDelete.character);
+      return next;
+    });
+    setPendingDelete(null);
+  };
+
+  const deleteActive = () => {
+    if (!activeCharacter) return;
+    deleteCharacterWithUndo(activeCharacter.id);
+  };
+
+  return (
+    <div className="font-sans antialiased">
+      <style>{`
+        /* Font strategy: try Inter/JetBrains Mono if the machine already has
+           them (or a connection to fetch them), but never depend on network
+           access — the stack falls back to quality system fonts that render
+           almost identically, so this works fully offline. */
+        * { font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; }
+        .font-mono { font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace; }
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: #18181b; }
+        ::-webkit-scrollbar-thumb { background: #3f3f46; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #52525b; }
+        input[type=number]::-webkit-inner-spin-button { opacity: 1; }
+        .print-only { display: none; }
+        @media print {
+          .no-print { display: none !important; }
+          .print-only { display: block !important; }
+          body, .bg-zinc-950 { background: white !important; }
+        }
+      `}</style>
+      {storageError && (
+        <div className="sticky top-0 z-40 bg-red-950 border-b border-red-800 px-4 py-2 flex items-center justify-center gap-2 text-xs text-red-300">
+          <span>{storageError}</span>
+          <button
+            onClick={() => downloadJson({ schemaVersion: SCHEMA_VERSION, exportedAt: new Date().toISOString(), characters }, `homebrew_vault_backup_${new Date().toISOString().slice(0, 10)}.json`)}
+            className="font-semibold underline hover:text-red-100"
+          >
+            Export Now
+          </button>
+        </div>
+      )}
+      {activeCharacter ? (
+        <CharacterEditor
+          character={activeCharacter}
+          onUpdate={updateActiveCharacter}
+          onBack={() => setActiveId(null)}
+          onExport={exportActive}
+          onDuplicate={duplicateActive}
+          onDelete={deleteActive}
+        />
+      ) : (
+        <VaultView characters={characters} setCharacters={setCharacters} onOpen={setActiveId} onDeleteCharacter={deleteCharacterWithUndo} />
+      )}
+      {pendingDelete && (
+        <UndoToast
+          message={`Deleted "${pendingDelete.character.name}"`}
+          onUndo={undoDelete}
+          onDismiss={() => setPendingDelete(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+
+ReactDOM.createRoot(document.getElementById("root")).render(<HomebrewVaultApp />);
+</script>
+</body>
+</html>
