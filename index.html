@@ -10,7 +10,8 @@
   "imports": {
     "react": "https://esm.sh/react@18",
     "react-dom/client": "https://esm.sh/react-dom@18/client",
-    "lucide-react": "https://esm.sh/lucide-react@0.469.0?deps=react@18"
+    "lucide-react": "https://esm.sh/lucide-react@0.469.0?deps=react@18",
+    "@supabase/supabase-js": "https://esm.sh/@supabase/supabase-js@2"
   }
 }
 </script>
@@ -24,14 +25,24 @@
 <script type="text/babel" data-type="module" data-presets="react">
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import ReactDOM from 'react-dom/client';
+import { createClient } from '@supabase/supabase-js';
 import {
   Plus, Minus, Trash2, Copy, Download, Upload, Search, X, ChevronDown, ChevronRight,
   Shield, Heart, Zap, Footprints, Target, Sparkles, Swords, Package, BookOpen,
   Grid3x3, List, HelpCircle, Tag as TagIcon, Filter,
   Skull, CheckCircle2, Circle, Layers,
   FolderOpen, User, Crown, Flame, Ghost, PlayCircle,
-  PenSquare, Compass, Waves, Printer, ImagePlus, Wand2, ClipboardPaste, Star
+  PenSquare, Compass, Waves, Printer, ImagePlus, Wand2, ClipboardPaste, Star,
+  Users, LogOut, Share2, EyeOff, Mail, Link as LinkIcon
 } from 'lucide-react';
+
+// ============================================================
+// SUPABASE
+// ============================================================
+
+const SUPABASE_URL = 'https://psmzewaofkvwujccmlrv.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_KUoetV_StYUXdpd-rxMzZA_Zi84ycQ7';
+const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
 // ============================================================
 // CONSTANTS
@@ -68,7 +79,6 @@ const ACTION_CATEGORY_LABELS = { action: 'Actions', bonus: 'Bonus Actions', reac
 const ICON_MAP = { User, Crown, Skull, Ghost, Flame, Sparkles, Swords, Shield, Compass, Waves };
 const ICON_NAMES = Object.keys(ICON_MAP);
 
-const STORAGE_KEY = 'homebrew-vault-data-v1';
 const LAST_OPEN_KEY = 'homebrew-vault-last-open-v1';
 const SCHEMA_VERSION = 1;
 
@@ -394,27 +404,137 @@ const createBlankCharacter = () => ({
   customTabs: [],
 });
 
-function loadVault() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      return Array.isArray(parsed) ? parsed : [];
-    }
-  } catch (e) { /* corrupt or unavailable storage */ }
-  return [];
+// ============================================================
+// SUPABASE-BACKED PERSISTENCE
+// ============================================================
+// Characters live in the `characters` table as { id, owner_id, campaign_id,
+// visibility, is_hidden_from_players, data }. `data` holds the same
+// character shape this app always used (name, hp, abilities, ...) so the
+// rest of the UI barely has to know the difference. rowToCharacter/
+// characterToRow translate between the two.
+
+function rowToCharacter(row) {
+  const shares = Array.isArray(row.character_shares) ? row.character_shares : [];
+  return {
+    ...row.data,
+    id: row.id,
+    ownerId: row.owner_id,
+    campaignId: row.campaign_id,
+    visibility: row.visibility,
+    isHiddenFromPlayers: row.is_hidden_from_players,
+    canEditByShare: shares.some((s) => s.permission === 'edit'),
+    lastEdited: row.updated_at ? new Date(row.updated_at).getTime() : row.data.lastEdited,
+  };
 }
 
-// Returns { ok: true } on success or { ok: false, error } so callers can
-// surface storage failures (quota exceeded, storage disabled, etc.) instead
-// of silently losing data.
-function saveVault(characters) {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(characters));
-    return { ok: true };
-  } catch (e) {
-    return { ok: false, error: e };
-  }
+function characterToDataPayload(character) {
+  const { ownerId, campaignId, visibility, isHiddenFromPlayers, canEditByShare, ...data } = character;
+  return data;
+}
+
+async function fetchCharacters() {
+  // The embedded character_shares select rides along under RLS: for a
+  // character you don't own, only your own share row (if any) is visible,
+  // which is exactly what's needed to know whether you have edit access.
+  const { data, error } = await supabase
+    .from('characters')
+    .select('*, character_shares(user_id, permission)')
+    .order('updated_at', { ascending: false });
+  if (error) throw error;
+  return data.map(rowToCharacter);
+}
+
+// `preserveId` is only for undo-delete, where character.id is a real
+// Supabase-assigned UUID from a row that just got deleted. Everywhere else
+// (new characters, duplicates, imports) character.id is either absent or a
+// client-side uid() string — not a valid uuid — so it must never be sent;
+// letting Postgres assign a fresh id with its default is correct there.
+async function insertCharacterRow(character, ownerId, { preserveId = false } = {}) {
+  const payload = {
+    owner_id: ownerId,
+    data: characterToDataPayload(character),
+    campaign_id: character.campaignId || null,
+    visibility: character.visibility || 'private',
+    is_hidden_from_players: !!character.isHiddenFromPlayers,
+  };
+  if (preserveId && character.id) payload.id = character.id;
+  const { data, error } = await supabase.from('characters').insert(payload).select().single();
+  if (error) throw error;
+  return rowToCharacter(data);
+}
+
+async function updateCharacterRow(character) {
+  const { error } = await supabase
+    .from('characters')
+    .update({
+      data: characterToDataPayload(character),
+      campaign_id: character.campaignId || null,
+      visibility: character.visibility || 'private',
+      is_hidden_from_players: !!character.isHiddenFromPlayers,
+    })
+    .eq('id', character.id);
+  if (error) throw error;
+}
+
+async function deleteCharacterRow(id) {
+  const { error } = await supabase.from('characters').delete().eq('id', id);
+  if (error) throw error;
+}
+
+// ============================================================
+// SUPABASE: CAMPAIGNS & SHARING
+// ============================================================
+
+async function fetchCampaigns() {
+  const { data, error } = await supabase.from('campaigns').select('*').order('created_at', { ascending: false });
+  if (error) throw error;
+  return data;
+}
+
+async function fetchCampaignMembers(campaignId) {
+  const { data, error } = await supabase
+    .from('campaign_members')
+    .select('user_id, role, profiles:user_id(display_name, email)')
+    .eq('campaign_id', campaignId);
+  if (error) throw error;
+  return data;
+}
+
+async function createCampaign(name, dmId) {
+  const { data, error } = await supabase.from('campaigns').insert({ name, dm_id: dmId }).select().single();
+  if (error) throw error;
+  return data;
+}
+
+async function joinCampaignByCode(inviteCode) {
+  const { data, error } = await supabase.rpc('join_campaign', { p_invite_code: inviteCode.trim() });
+  if (error) throw error;
+  return data;
+}
+
+async function fetchShares(characterId) {
+  const { data, error } = await supabase
+    .from('character_shares')
+    .select('user_id, permission, profiles:user_id(display_name, email)')
+    .eq('character_id', characterId);
+  if (error) throw error;
+  return data;
+}
+
+async function findProfileByEmail(email) {
+  const { data, error } = await supabase.from('profiles').select('id, display_name, email').eq('email', email.trim().toLowerCase()).maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
+async function upsertShare(characterId, userId, permission) {
+  const { error } = await supabase.from('character_shares').upsert({ character_id: characterId, user_id: userId, permission });
+  if (error) throw error;
+}
+
+async function removeShare(characterId, userId) {
+  const { error } = await supabase.from('character_shares').delete().eq('character_id', characterId).eq('user_id', userId);
+  if (error) throw error;
 }
 
 function downloadJson(data, filename) {
@@ -2354,6 +2474,171 @@ function CustomCategoryTab({ tab, onUpdate, editMode }) {
 // CHARACTER EDITOR SHELL
 // ============================================================
 
+// Share & Visibility: attach a character to a campaign (visible to every
+// member of that campaign), grant specific people view/edit access, and —
+// if the current user is the DM of the attached campaign — hide it from
+// players entirely (for NPCs/secrets) while the DM still sees it.
+function ShareModal({ character, campaigns, currentUserId, onUpdateCharacter, onClose }) {
+  const [shares, setShares] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [addEmail, setAddEmail] = useState('');
+  const [addPermission, setAddPermission] = useState('view');
+  const [busy, setBusy] = useState(false);
+
+  const loadShares = () => {
+    setLoading(true);
+    fetchShares(character.id)
+      .then((rows) => setShares(rows))
+      .catch((e) => setError(e.message))
+      .finally(() => setLoading(false));
+  };
+
+  useEffect(loadShares, [character.id]);
+
+  const attachedCampaign = campaigns.find((c) => c.id === character.campaignId);
+  const isDmOfAttached = attachedCampaign && attachedCampaign.dm_id === currentUserId;
+
+  const handleCampaignChange = (campaignId) => {
+    onUpdateCharacter({
+      campaignId: campaignId || null,
+      visibility: campaignId ? 'campaign' : 'private',
+      isHiddenFromPlayers: false,
+    });
+  };
+
+  const handleAddShare = async () => {
+    const email = addEmail.trim();
+    if (!email) return;
+    setBusy(true);
+    setError('');
+    try {
+      const profile = await findProfileByEmail(email);
+      if (!profile) {
+        setError(`No account found for ${email} — they need to sign up first.`);
+        return;
+      }
+      if (profile.id === currentUserId) {
+        setError("That's your own account.");
+        return;
+      }
+      await upsertShare(character.id, profile.id, addPermission);
+      setAddEmail('');
+      loadShares();
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleChangePermission = async (userId, permission) => {
+    await upsertShare(character.id, userId, permission);
+    loadShares();
+  };
+
+  const handleRemove = async (userId) => {
+    await removeShare(character.id, userId);
+    loadShares();
+  };
+
+  return (
+    <Modal title="Share & Visibility" onClose={onClose}>
+      <div className="space-y-5">
+        <div>
+          <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-1.5">Campaign</div>
+          <select
+            value={character.campaignId || ''}
+            onChange={(e) => handleCampaignChange(e.target.value)}
+            className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1.5 text-sm text-zinc-100 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+          >
+            <option value="">Not attached to a campaign (private)</option>
+            {campaigns.map((c) => (
+              <option key={c.id} value={c.id}>{c.name}{c.dm_id === currentUserId ? ' (you DM)' : ''}</option>
+            ))}
+          </select>
+          {attachedCampaign && (
+            <p className="text-[11px] text-zinc-500 mt-1.5">Every member of "{attachedCampaign.name}" can view this character.</p>
+          )}
+          {isDmOfAttached && (
+            <label className="flex items-center gap-2 mt-2.5 text-xs text-amber-300 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={!!character.isHiddenFromPlayers}
+                onChange={(e) => onUpdateCharacter({ isHiddenFromPlayers: e.target.checked })}
+                className="accent-amber-500"
+              />
+              <EyeOff className="w-3.5 h-3.5" /> Hide from players (only you can see this — good for NPCs)
+            </label>
+          )}
+        </div>
+
+        <div className="border-t border-zinc-800 pt-4">
+          <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-2">People with direct access</div>
+          {loading ? (
+            <div className="text-xs text-zinc-600 italic">Loading…</div>
+          ) : shares.length === 0 ? (
+            <div className="text-xs text-zinc-600 italic mb-2">Not shared with anyone individually yet.</div>
+          ) : (
+            <div className="space-y-1.5 mb-2">
+              {shares.map((s) => (
+                <div key={s.user_id} className="flex items-center justify-between gap-2 bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5">
+                  <div className="min-w-0">
+                    <div className="text-sm text-zinc-200 truncate">{s.profiles?.display_name || 'Unknown'}</div>
+                    <div className="text-[10px] text-zinc-500 truncate">{s.profiles?.email}</div>
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <select
+                      value={s.permission}
+                      onChange={(e) => handleChangePermission(s.user_id, e.target.value)}
+                      className="bg-zinc-800 border border-zinc-700 rounded px-1.5 py-1 text-xs text-zinc-200 focus:outline-none"
+                    >
+                      <option value="view">Can view</option>
+                      <option value="edit">Can edit</option>
+                    </select>
+                    <button onClick={() => handleRemove(s.user_id)} className="text-zinc-600 hover:text-red-400">
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div className="flex items-center gap-1.5">
+            <div className="relative flex-1">
+              <Mail className="w-3.5 h-3.5 text-zinc-600 absolute left-2 top-1/2 -translate-y-1/2" />
+              <input
+                value={addEmail}
+                onChange={(e) => setAddEmail(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleAddShare(); } }}
+                placeholder="friend@email.com"
+                className="w-full bg-zinc-800 border border-zinc-700 rounded pl-7 pr-2 py-1.5 text-xs text-zinc-100 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+              />
+            </div>
+            <select
+              value={addPermission}
+              onChange={(e) => setAddPermission(e.target.value)}
+              className="bg-zinc-800 border border-zinc-700 rounded px-1.5 py-1.5 text-xs text-zinc-200 focus:outline-none"
+            >
+              <option value="view">Can view</option>
+              <option value="edit">Can edit</option>
+            </select>
+            <button
+              onClick={handleAddShare}
+              disabled={busy}
+              className="bg-emerald-700 hover:bg-emerald-600 disabled:opacity-50 text-white text-xs font-semibold px-3 py-1.5 rounded-lg shrink-0"
+            >
+              Add
+            </button>
+          </div>
+          {error && <div className="text-[11px] text-red-400 mt-1.5">{error}</div>}
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 const EDITOR_TABS = [
   { key: 'stats', label: 'Stats & Defenses', icon: Shield },
   { key: 'actions', label: 'Actions & Powers', icon: Swords },
@@ -2361,9 +2646,10 @@ const EDITOR_TABS = [
   { key: 'details', label: 'Details', icon: Layers },
 ];
 
-function CharacterEditor({ character, onUpdate, onBack, onExport, onDuplicate, onDelete }) {
+function CharacterEditor({ character, onUpdate, onBack, onExport, onDuplicate, onDelete, currentUserId, campaigns, isOwner, canEdit }) {
   const [editMode, setEditMode] = useState(false);
   const [activeTab, setActiveTab] = useState('stats');
+  const [showShare, setShowShare] = useState(false);
 
   const updateCharacter = (patch) => {
     onUpdate({ ...character, ...patch, lastEdited: Date.now() });
@@ -2394,13 +2680,20 @@ function CharacterEditor({ character, onUpdate, onBack, onExport, onDuplicate, o
           <div className="flex items-center gap-1.5">
             <IconButton icon={Printer} label="Print" onClick={() => window.print()} />
             <IconButton icon={Copy} label="Duplicate" onClick={onDuplicate} />
+            {isOwner && <IconButton icon={Share2} label="Share" onClick={() => setShowShare(true)} />}
             <IconButton icon={Download} label="Export" onClick={onExport} />
-            <IconButton icon={Trash2} label="Delete" onClick={onDelete} variant="danger" />
+            {isOwner && <IconButton icon={Trash2} label="Delete" onClick={onDelete} variant="danger" />}
           </div>
         </div>
 
+        {!canEdit && (
+          <div className="mx-4 mt-3 px-3 py-2 bg-sky-950 border border-sky-800 rounded-lg text-xs text-sky-300 no-print">
+            View only — you don't have edit access to this character.
+          </div>
+        )}
+
         <div className="no-print">
-          <QuickCombatBar character={character} updateCharacter={updateCharacter} editMode={editMode} setEditMode={setEditMode} />
+          <QuickCombatBar character={character} updateCharacter={updateCharacter} editMode={editMode && canEdit} setEditMode={canEdit ? setEditMode : () => {}} />
         </div>
 
         {/* Role & Tags row */}
@@ -2518,7 +2811,216 @@ function CharacterEditor({ character, onUpdate, onBack, onExport, onDuplicate, o
           ))}
         </div>
       </div>
+
+      {showShare && (
+        <ShareModal
+          character={character}
+          campaigns={campaigns}
+          currentUserId={currentUserId}
+          onUpdateCharacter={updateCharacter}
+          onClose={() => setShowShare(false)}
+        />
+      )}
     </div>
+  );
+}
+
+// ============================================================
+// AUTH SCREEN
+// ============================================================
+
+function AuthScreen() {
+  const [mode, setMode] = useState('login'); // 'login' | 'signup'
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setError('');
+    setNotice('');
+    setBusy(true);
+    try {
+      if (mode === 'signup') {
+        const { error: err } = await supabase.auth.signUp({ email: email.trim(), password });
+        if (err) throw err;
+        setNotice('Account created. If email confirmation is enabled on this project, check your inbox for a confirmation link before logging in.');
+      } else {
+        const { error: err } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
+        if (err) throw err;
+      }
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-zinc-950 flex items-center justify-center p-4">
+      <div className="w-full max-w-sm">
+        <div className="flex items-center gap-2.5 justify-center mb-6">
+          <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-emerald-600 to-violet-600 flex items-center justify-center">
+            <BookOpen className="w-5 h-5 text-white" />
+          </div>
+          <h1 className="text-lg font-bold text-zinc-100">Homebrew Vault</h1>
+        </div>
+        <Card className="p-5">
+          <div className="flex items-center gap-1 mb-4 bg-zinc-950 border border-zinc-800 rounded-lg p-1">
+            <button
+              onClick={() => setMode('login')}
+              className={`flex-1 text-xs font-semibold py-1.5 rounded-md transition-colors ${mode === 'login' ? 'bg-emerald-600 text-white' : 'text-zinc-500'}`}
+            >
+              Log In
+            </button>
+            <button
+              onClick={() => setMode('signup')}
+              className={`flex-1 text-xs font-semibold py-1.5 rounded-md transition-colors ${mode === 'signup' ? 'bg-emerald-600 text-white' : 'text-zinc-500'}`}
+            >
+              Sign Up
+            </button>
+          </div>
+          <form onSubmit={submit} className="space-y-3">
+            <div>
+              <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-1">Email</div>
+              <input
+                type="email"
+                required
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                className="w-full bg-zinc-800 border border-zinc-700 rounded px-2.5 py-1.5 text-sm text-zinc-100 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+              />
+            </div>
+            <div>
+              <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-1">Password</div>
+              <input
+                type="password"
+                required
+                minLength={6}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="w-full bg-zinc-800 border border-zinc-700 rounded px-2.5 py-1.5 text-sm text-zinc-100 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+              />
+            </div>
+            {error && <div className="text-xs text-red-400 bg-red-950 border border-red-900 rounded px-2.5 py-1.5">{error}</div>}
+            {notice && <div className="text-xs text-emerald-400 bg-emerald-950 border border-emerald-900 rounded px-2.5 py-1.5">{notice}</div>}
+            <button
+              type="submit"
+              disabled={busy}
+              className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-sm font-semibold py-2 rounded-lg transition-colors"
+            >
+              {busy ? 'Please wait…' : mode === 'signup' ? 'Create Account' : 'Log In'}
+            </button>
+          </form>
+        </Card>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
+// CAMPAIGNS MODAL
+// ============================================================
+
+function CampaignsModal({ campaigns, currentUserId, onRefresh, onClose }) {
+  const [newName, setNewName] = useState('');
+  const [joinCode, setJoinCode] = useState('');
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const handleCreate = async () => {
+    const name = newName.trim();
+    if (!name) return;
+    setBusy(true);
+    setError('');
+    try {
+      await createCampaign(name, currentUserId);
+      setNewName('');
+      await onRefresh();
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleJoin = async () => {
+    if (!joinCode.trim()) return;
+    setBusy(true);
+    setError('');
+    try {
+      await joinCampaignByCode(joinCode);
+      setJoinCode('');
+      await onRefresh();
+    } catch (e) {
+      setError('Invalid invite code.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Modal title="Campaigns" onClose={onClose}>
+      <div className="space-y-5">
+        <div>
+          <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-2">Your Campaigns</div>
+          {campaigns.length === 0 ? (
+            <div className="text-xs text-zinc-600 italic">You're not in any campaigns yet.</div>
+          ) : (
+            <div className="space-y-1.5">
+              {campaigns.map((c) => {
+                const isDm = c.dm_id === currentUserId;
+                return (
+                  <div key={c.id} className="flex items-center justify-between gap-2 bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-2">
+                    <div className="min-w-0">
+                      <div className="text-sm text-zinc-200 truncate flex items-center gap-1.5">
+                        {c.name}
+                        {isDm && <Badge color="amber" size="xs">DM</Badge>}
+                      </div>
+                      {isDm && <div className="text-[10px] text-zinc-500 mt-0.5">Invite code: <span className="font-mono text-zinc-300">{c.invite_code}</span></div>}
+                    </div>
+                    {isDm && <CopyButton text={c.invite_code} label="Copy Code" icon={LinkIcon} />}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        <div className="border-t border-zinc-800 pt-4">
+          <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-1.5">Create a Campaign (you'll be the DM)</div>
+          <div className="flex items-center gap-1.5">
+            <input
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+              placeholder="Campaign name"
+              className="flex-1 bg-zinc-800 border border-zinc-700 rounded px-2.5 py-1.5 text-sm text-zinc-100 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+            />
+            <button onClick={handleCreate} disabled={busy} className="bg-emerald-700 hover:bg-emerald-600 disabled:opacity-50 text-white text-xs font-semibold px-3 py-1.5 rounded-lg shrink-0">
+              Create
+            </button>
+          </div>
+        </div>
+
+        <div className="border-t border-zinc-800 pt-4">
+          <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-1.5">Join a Campaign</div>
+          <div className="flex items-center gap-1.5">
+            <input
+              value={joinCode}
+              onChange={(e) => setJoinCode(e.target.value)}
+              placeholder="Invite code"
+              className="flex-1 bg-zinc-800 border border-zinc-700 rounded px-2.5 py-1.5 text-sm text-zinc-100 font-mono focus:outline-none focus:ring-1 focus:ring-emerald-500"
+            />
+            <button onClick={handleJoin} disabled={busy} className="bg-violet-700 hover:bg-violet-600 disabled:opacity-50 text-white text-xs font-semibold px-3 py-1.5 rounded-lg shrink-0">
+              Join
+            </button>
+          </div>
+        </div>
+        {error && <div className="text-xs text-red-400">{error}</div>}
+      </div>
+    </Modal>
   );
 }
 
@@ -2526,7 +3028,7 @@ function CharacterEditor({ character, onUpdate, onBack, onExport, onDuplicate, o
 // VAULT VIEW (grid/list, filter, sort)
 // ============================================================
 
-function CharacterCard({ character, onOpen, onDuplicate, onExport, onDelete, view }) {
+function CharacterCard({ character, onOpen, onDuplicate, onExport, onDelete, view, isOwner, campaignName }) {
   const pct = character.hp.max > 0 ? clamp((character.hp.current / character.hp.max) * 100, 0, 100) : 0;
   const hpColor = pct > 50 ? 'bg-emerald-500' : pct > 25 ? 'bg-amber-500' : 'bg-red-500';
 
@@ -2537,7 +3039,12 @@ function CharacterCard({ character, onOpen, onDuplicate, onExport, onDelete, vie
           <Avatar character={character} className="w-9 h-9 rounded-lg" iconClassName="w-4 h-4 text-emerald-400" />
         </div>
         <div className="min-w-0 flex-1">
-          <div className="text-sm font-semibold text-zinc-100 truncate">{character.name}</div>
+          <div className="text-sm font-semibold text-zinc-100 truncate flex items-center gap-1.5">
+            {character.name}
+            {!isOwner && <Badge color="sky" size="xs">Shared</Badge>}
+            {campaignName && <Badge color="violet" size="xs">{campaignName}</Badge>}
+            {isOwner && character.isHiddenFromPlayers && <Badge color="amber" size="xs">Hidden from players</Badge>}
+          </div>
           <div className="text-[11px] text-zinc-500 truncate">{character.role || character.subtitle}</div>
         </div>
         <div className="hidden sm:flex items-center gap-3 text-xs font-mono text-zinc-400 shrink-0">
@@ -2550,7 +3057,7 @@ function CharacterCard({ character, onOpen, onDuplicate, onExport, onDelete, vie
         <div className="flex items-center gap-0.5 shrink-0" onClick={(e) => e.stopPropagation()}>
           <IconButton icon={Copy} onClick={onDuplicate} label="" />
           <IconButton icon={Download} onClick={onExport} label="" />
-          <IconButton icon={Trash2} onClick={onDelete} label="" variant="danger" />
+          {isOwner && <IconButton icon={Trash2} onClick={onDelete} label="" variant="danger" />}
         </div>
       </div>
     );
@@ -2564,7 +3071,12 @@ function CharacterCard({ character, onOpen, onDuplicate, onExport, onDelete, vie
             <Avatar character={character} className="w-10 h-10 rounded-lg" iconClassName="w-5 h-5 text-emerald-400" />
           </div>
           <div className="min-w-0">
-            <div className="text-sm font-semibold text-zinc-100 truncate">{character.name}</div>
+            <div className="text-sm font-semibold text-zinc-100 truncate flex items-center gap-1.5">
+              {character.name}
+              {!isOwner && <Badge color="sky" size="xs">Shared</Badge>}
+              {campaignName && <Badge color="violet" size="xs">{campaignName}</Badge>}
+              {isOwner && character.isHiddenFromPlayers && <Badge color="amber" size="xs">Hidden</Badge>}
+            </div>
             <div className="text-[11px] text-zinc-500 truncate">{character.role || character.subtitle || '—'}</div>
           </div>
         </div>
@@ -2592,7 +3104,7 @@ function CharacterCard({ character, onOpen, onDuplicate, onExport, onDelete, vie
         <div className="flex items-center gap-0.5">
           <IconButton icon={Copy} onClick={onDuplicate} label="" />
           <IconButton icon={Download} onClick={onExport} label="" />
-          <IconButton icon={Trash2} onClick={onDelete} label="" variant="danger" />
+          {isOwner && <IconButton icon={Trash2} onClick={onDelete} label="" variant="danger" />}
         </div>
       </div>
     </div>
@@ -2726,13 +3238,15 @@ function ImportModal({ onClose, onImport, existingCharacters }) {
   );
 }
 
-function VaultView({ characters, setCharacters, onOpen, onDeleteCharacter }) {
+function VaultView({ characters, onOpen, onCreate, onDuplicate, onImport, onDeleteCharacter, currentUserId, userEmail, campaigns, onRefreshCampaigns, onLogout }) {
   const [search, setSearch] = useState('');
   const [view, setView] = useState('grid');
   const [sortBy, setSortBy] = useState('lastEdited');
   const [activeTagFilters, setActiveTagFilters] = useState([]);
+  const [ownerFilter, setOwnerFilter] = useState('all'); // 'all' | 'mine' | 'shared'
   const [showImport, setShowImport] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
+  const [showCampaigns, setShowCampaigns] = useState(false);
 
   const allTags = useMemo(() => {
     const s = new Set();
@@ -2740,11 +3254,14 @@ function VaultView({ characters, setCharacters, onOpen, onDeleteCharacter }) {
     return Array.from(s).sort();
   }, [characters]);
 
+  const campaignNameById = useMemo(() => Object.fromEntries(campaigns.map((c) => [c.id, c.name])), [campaigns]);
+
   const filtered = useMemo(() => {
     let list = characters.filter((c) => {
       const matchesSearch = !search || c.name.toLowerCase().includes(search.toLowerCase()) || c.role.toLowerCase().includes(search.toLowerCase());
       const matchesTags = activeTagFilters.length === 0 || activeTagFilters.every((t) => c.tags.includes(t));
-      return matchesSearch && matchesTags;
+      const matchesOwner = ownerFilter === 'all' || (ownerFilter === 'mine' ? c.ownerId === currentUserId : c.ownerId !== currentUserId);
+      return matchesSearch && matchesTags && matchesOwner;
     });
     list.sort((a, b) => {
       if (sortBy === 'name') return a.name.localeCompare(b.name);
@@ -2753,20 +3270,7 @@ function VaultView({ characters, setCharacters, onOpen, onDeleteCharacter }) {
       return 0;
     });
     return list;
-  }, [characters, search, activeTagFilters, sortBy]);
-
-  const createNew = () => {
-    const c = createBlankCharacter();
-    setCharacters([c, ...characters]);
-    onOpen(c.id);
-  };
-
-  const duplicate = (id) => {
-    const orig = characters.find((c) => c.id === id);
-    if (!orig) return;
-    const copy = { ...cloneCharacterWithFreshIds(orig), name: orig.name + ' (Copy)' };
-    setCharacters([copy, ...characters]);
-  };
+  }, [characters, search, activeTagFilters, sortBy, ownerFilter, currentUserId]);
 
   const exportOne = (id) => {
     const c = characters.find((ch) => ch.id === id);
@@ -2775,14 +3279,11 @@ function VaultView({ characters, setCharacters, onOpen, onDeleteCharacter }) {
   };
 
   const exportAll = () => {
+    const mine = characters.filter((c) => c.ownerId === currentUserId);
     downloadJson(
-      { schemaVersion: SCHEMA_VERSION, exportedAt: new Date().toISOString(), characters },
+      { schemaVersion: SCHEMA_VERSION, exportedAt: new Date().toISOString(), characters: mine },
       `homebrew_vault_backup_${new Date().toISOString().slice(0, 10)}.json`
     );
-  };
-
-  const deleteOne = (id) => {
-    onDeleteCharacter(id);
   };
 
   const toggleTagFilter = (t) => {
@@ -2799,15 +3300,17 @@ function VaultView({ characters, setCharacters, onOpen, onDeleteCharacter }) {
             </div>
             <div>
               <h1 className="text-lg font-bold text-zinc-100 leading-tight">Homebrew Vault</h1>
-              <p className="text-[11px] text-zinc-500">{characters.length} {characters.length === 1 ? 'entry' : 'entries'} saved locally</p>
+              <p className="text-[11px] text-zinc-500">{userEmail} · {characters.length} {characters.length === 1 ? 'entry' : 'entries'} visible to you</p>
             </div>
           </div>
           <div className="flex items-center gap-2">
+            <IconButton icon={Users} label="Campaigns" onClick={() => setShowCampaigns(true)} />
             <IconButton icon={Upload} label="Import" onClick={() => setShowImport(true)} />
             <IconButton icon={Download} label="Export Vault" onClick={exportAll} />
-            <button onClick={createNew} className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-semibold px-3.5 py-2 rounded-lg transition-colors">
+            <button onClick={onCreate} className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-semibold px-3.5 py-2 rounded-lg transition-colors">
               <Plus className="w-4 h-4" /> New Character
             </button>
+            <IconButton icon={LogOut} label="" onClick={onLogout} />
           </div>
         </div>
 
@@ -2821,6 +3324,15 @@ function VaultView({ characters, setCharacters, onOpen, onDeleteCharacter }) {
               className="w-full bg-zinc-900 border border-zinc-800 rounded-lg pl-8 pr-3 py-2 text-sm text-zinc-100 focus:outline-none focus:ring-1 focus:ring-emerald-500"
             />
           </div>
+          <select
+            value={ownerFilter}
+            onChange={(e) => setOwnerFilter(e.target.value)}
+            className="bg-zinc-900 border border-zinc-800 rounded-lg px-2.5 py-2 text-xs text-zinc-300 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+          >
+            <option value="all">Everyone's</option>
+            <option value="mine">Mine only</option>
+            <option value="shared">Shared with me</option>
+          </select>
           <select
             value={sortBy}
             onChange={(e) => setSortBy(e.target.value)}
@@ -2860,10 +3372,12 @@ function VaultView({ characters, setCharacters, onOpen, onDeleteCharacter }) {
                 key={c.id}
                 character={c}
                 view={view}
+                isOwner={c.ownerId === currentUserId}
+                campaignName={c.campaignId ? campaignNameById[c.campaignId] : null}
                 onOpen={() => onOpen(c.id)}
-                onDuplicate={() => duplicate(c.id)}
+                onDuplicate={() => onDuplicate(c.id)}
                 onExport={() => exportOne(c.id)}
-                onDelete={() => deleteOne(c.id)}
+                onDelete={() => onDeleteCharacter(c.id)}
               />
             ))}
           </div>
@@ -2874,13 +3388,16 @@ function VaultView({ characters, setCharacters, onOpen, onDeleteCharacter }) {
         <ImportModal
           onClose={() => setShowImport(false)}
           existingCharacters={characters}
-          onImport={(newChars, replaceIds) => {
-            if (replaceIds && replaceIds.size > 0) {
-              setCharacters([...newChars, ...characters.filter((c) => !replaceIds.has(c.id))]);
-            } else {
-              setCharacters([...newChars, ...characters]);
-            }
-          }}
+          onImport={onImport}
+        />
+      )}
+
+      {showCampaigns && (
+        <CampaignsModal
+          campaigns={campaigns}
+          currentUserId={currentUserId}
+          onRefresh={onRefreshCampaigns}
+          onClose={() => setShowCampaigns(false)}
         />
       )}
     </div>
@@ -2892,27 +3409,48 @@ function VaultView({ characters, setCharacters, onOpen, onDeleteCharacter }) {
 // ============================================================
 
 function HomebrewVaultApp() {
-  const [characters, setCharacters] = useState(() => loadVault());
-  const [activeId, setActiveId] = useState(() => {
-    try {
-      const savedId = localStorage.getItem(LAST_OPEN_KEY);
-      // Only restore if that character still exists — avoids reopening a
-      // stale or since-deleted entry.
-      const vault = loadVault();
-      if (savedId && vault.some((c) => c.id === savedId)) return savedId;
-    } catch (e) { /* storage unavailable */ }
-    return null;
-  });
-  const [storageError, setStorageError] = useState(null);
+  // undefined = auth state not yet known, null = logged out, object = logged in
+  const [session, setSession] = useState(undefined);
+  const [characters, setCharacters] = useState([]);
+  const [campaigns, setCampaigns] = useState([]);
+  const [activeId, setActiveId] = useState(null);
+  const [dataLoading, setDataLoading] = useState(false);
+  const [loadError, setLoadError] = useState(null);
 
   useEffect(() => {
-    const result = saveVault(characters);
-    if (!result.ok) {
-      setStorageError('Could not save to local storage — your browser storage may be full or disabled. Export your vault now to avoid losing changes.');
-    } else {
-      setStorageError(null);
+    supabase.auth.getSession().then(({ data }) => setSession(data.session));
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, newSession) => setSession(newSession));
+    return () => sub.subscription.unsubscribe();
+  }, []);
+
+  const refreshCampaigns = async () => {
+    try {
+      setCampaigns(await fetchCampaigns());
+    } catch (e) { /* non-critical, leave prior list in place */ }
+  };
+
+  useEffect(() => {
+    if (!session) {
+      setCharacters([]);
+      setCampaigns([]);
+      setActiveId(null);
+      return;
     }
-  }, [characters]);
+    setDataLoading(true);
+    setLoadError(null);
+    Promise.all([
+      fetchCharacters().then(setCharacters),
+      fetchCampaigns().then(setCampaigns),
+    ])
+      .catch((e) => setLoadError(e.message))
+      .finally(() => setDataLoading(false));
+
+    // Restore whichever character was open last time, on this device.
+    try {
+      const savedId = localStorage.getItem(LAST_OPEN_KEY);
+      if (savedId) setActiveId(savedId);
+    } catch (e) { /* storage unavailable */ }
+  }, [session]);
 
   useEffect(() => {
     try {
@@ -2923,8 +3461,13 @@ function HomebrewVaultApp() {
 
   const activeCharacter = characters.find((c) => c.id === activeId);
 
-  const updateActiveCharacter = (updated) => {
-    setCharacters(characters.map((c) => (c.id === updated.id ? updated : c)));
+  const updateActiveCharacter = async (updated) => {
+    setCharacters((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
+    try {
+      await updateCharacterRow(updated);
+    } catch (e) {
+      setLoadError('Could not save your last change: ' + e.message);
+    }
   };
 
   const exportActive = () => {
@@ -2932,34 +3475,92 @@ function HomebrewVaultApp() {
     downloadJson({ ...activeCharacter, schemaVersion: SCHEMA_VERSION }, `${activeCharacter.name.replace(/[^a-z0-9]/gi, '_')}.json`);
   };
 
-  const duplicateActive = () => {
-    if (!activeCharacter) return;
-    const copy = { ...cloneCharacterWithFreshIds(activeCharacter), name: activeCharacter.name + ' (Copy)' };
-    setCharacters([copy, ...characters]);
-    setActiveId(copy.id);
+  const createNew = async () => {
+    try {
+      const row = await insertCharacterRow(createBlankCharacter(), session.user.id);
+      setCharacters((prev) => [row, ...prev]);
+      setActiveId(row.id);
+    } catch (e) {
+      setLoadError(e.message);
+    }
   };
 
-  // Undo-aware delete: removes immediately but keeps the character + its
-  // original index around briefly so a misclick can be reversed.
+  // Returns the new row so callers can decide whether to navigate to it.
+  const duplicateCharacter = async (id) => {
+    const orig = characters.find((c) => c.id === id);
+    if (!orig) return null;
+    const copy = {
+      ...cloneCharacterWithFreshIds(orig),
+      name: orig.name + ' (Copy)',
+      campaignId: null,
+      visibility: 'private',
+      isHiddenFromPlayers: false,
+    };
+    try {
+      const row = await insertCharacterRow(copy, session.user.id);
+      setCharacters((prev) => [row, ...prev]);
+      return row;
+    } catch (e) {
+      setLoadError(e.message);
+      return null;
+    }
+  };
+
+  const duplicateActive = async () => {
+    if (!activeCharacter) return;
+    const row = await duplicateCharacter(activeCharacter.id);
+    if (row) setActiveId(row.id);
+  };
+
+  const handleImport = async (newChars, replaceIds) => {
+    try {
+      if (replaceIds && replaceIds.size > 0) {
+        await Promise.all([...replaceIds].map((id) => deleteCharacterRow(id)));
+      }
+      const inserted = await Promise.all(newChars.map((nc) => insertCharacterRow(nc, session.user.id)));
+      setCharacters((prev) => [...inserted, ...prev.filter((c) => !replaceIds || !replaceIds.has(c.id))]);
+    } catch (e) {
+      setLoadError(e.message);
+    }
+  };
+
+  // Undo-aware delete: removes immediately (and on the server) but keeps the
+  // character + its original index around briefly so a misclick can be
+  // reversed by re-inserting it with the same id.
   const [pendingDelete, setPendingDelete] = useState(null); // { character, index }
 
-  const deleteCharacterWithUndo = (id) => {
+  const deleteCharacterWithUndo = async (id) => {
     const index = characters.findIndex((c) => c.id === id);
     if (index === -1) return;
     const removed = characters[index];
-    setCharacters(characters.filter((c) => c.id !== id));
+    setCharacters((prev) => prev.filter((c) => c.id !== id));
     if (activeId === id) setActiveId(null);
-    setPendingDelete({ character: removed, index });
+    try {
+      await deleteCharacterRow(id);
+      setPendingDelete({ character: removed, index });
+    } catch (e) {
+      // Delete failed server-side (e.g. not the owner) — put it back locally.
+      setCharacters((prev) => {
+        const next = [...prev];
+        next.splice(Math.min(index, next.length), 0, removed);
+        return next;
+      });
+      setLoadError(e.message);
+    }
   };
 
-  const undoDelete = () => {
+  const undoDelete = async () => {
     if (!pendingDelete) return;
-    setCharacters((prev) => {
-      const next = [...prev];
-      const insertAt = Math.min(pendingDelete.index, next.length);
-      next.splice(insertAt, 0, pendingDelete.character);
-      return next;
-    });
+    try {
+      const row = await insertCharacterRow(pendingDelete.character, session.user.id, { preserveId: true });
+      setCharacters((prev) => {
+        const next = [...prev];
+        next.splice(Math.min(pendingDelete.index, next.length), 0, row);
+        return next;
+      });
+    } catch (e) {
+      setLoadError(e.message);
+    }
     setPendingDelete(null);
   };
 
@@ -2968,39 +3569,60 @@ function HomebrewVaultApp() {
     deleteCharacterWithUndo(activeCharacter.id);
   };
 
+  const handleLogout = () => supabase.auth.signOut();
+
+  const globalStyle = (
+    <style>{`
+      /* Font strategy: try Inter/JetBrains Mono if the machine already has
+         them (or a connection to fetch them), but never depend on network
+         access — the stack falls back to quality system fonts that render
+         almost identically, so this works fully offline. */
+      * { font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; }
+      .font-mono { font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace; }
+      ::-webkit-scrollbar { width: 8px; height: 8px; }
+      ::-webkit-scrollbar-track { background: #18181b; }
+      ::-webkit-scrollbar-thumb { background: #3f3f46; border-radius: 4px; }
+      ::-webkit-scrollbar-thumb:hover { background: #52525b; }
+      input[type=number]::-webkit-inner-spin-button { opacity: 1; }
+      .print-only { display: none; }
+      @media print {
+        .no-print { display: none !important; }
+        .print-only { display: block !important; }
+        body, .bg-zinc-950 { background: white !important; }
+      }
+    `}</style>
+  );
+
+  if (session === undefined) {
+    return (
+      <div className="font-sans antialiased min-h-screen bg-zinc-950 flex items-center justify-center text-zinc-500 text-sm">
+        {globalStyle}
+        Loading…
+      </div>
+    );
+  }
+
+  if (!session) {
+    return (
+      <div className="font-sans antialiased">
+        {globalStyle}
+        <AuthScreen />
+      </div>
+    );
+  }
+
   return (
     <div className="font-sans antialiased">
-      <style>{`
-        /* Font strategy: try Inter/JetBrains Mono if the machine already has
-           them (or a connection to fetch them), but never depend on network
-           access — the stack falls back to quality system fonts that render
-           almost identically, so this works fully offline. */
-        * { font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; }
-        .font-mono { font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace; }
-        ::-webkit-scrollbar { width: 8px; height: 8px; }
-        ::-webkit-scrollbar-track { background: #18181b; }
-        ::-webkit-scrollbar-thumb { background: #3f3f46; border-radius: 4px; }
-        ::-webkit-scrollbar-thumb:hover { background: #52525b; }
-        input[type=number]::-webkit-inner-spin-button { opacity: 1; }
-        .print-only { display: none; }
-        @media print {
-          .no-print { display: none !important; }
-          .print-only { display: block !important; }
-          body, .bg-zinc-950 { background: white !important; }
-        }
-      `}</style>
-      {storageError && (
+      {globalStyle}
+      {loadError && (
         <div className="sticky top-0 z-40 bg-red-950 border-b border-red-800 px-4 py-2 flex items-center justify-center gap-2 text-xs text-red-300">
-          <span>{storageError}</span>
-          <button
-            onClick={() => downloadJson({ schemaVersion: SCHEMA_VERSION, exportedAt: new Date().toISOString(), characters }, `homebrew_vault_backup_${new Date().toISOString().slice(0, 10)}.json`)}
-            className="font-semibold underline hover:text-red-100"
-          >
-            Export Now
-          </button>
+          <span>{loadError}</span>
+          <button onClick={() => setLoadError(null)} className="font-semibold underline hover:text-red-100">Dismiss</button>
         </div>
       )}
-      {activeCharacter ? (
+      {dataLoading ? (
+        <div className="min-h-screen flex items-center justify-center text-zinc-500 text-sm">Loading your vault…</div>
+      ) : activeCharacter ? (
         <CharacterEditor
           character={activeCharacter}
           onUpdate={updateActiveCharacter}
@@ -3008,9 +3630,25 @@ function HomebrewVaultApp() {
           onExport={exportActive}
           onDuplicate={duplicateActive}
           onDelete={deleteActive}
+          currentUserId={session.user.id}
+          campaigns={campaigns}
+          isOwner={activeCharacter.ownerId === session.user.id}
+          canEdit={activeCharacter.ownerId === session.user.id || activeCharacter.canEditByShare}
         />
       ) : (
-        <VaultView characters={characters} setCharacters={setCharacters} onOpen={setActiveId} onDeleteCharacter={deleteCharacterWithUndo} />
+        <VaultView
+          characters={characters}
+          onOpen={setActiveId}
+          onCreate={createNew}
+          onDuplicate={duplicateCharacter}
+          onImport={handleImport}
+          onDeleteCharacter={deleteCharacterWithUndo}
+          currentUserId={session.user.id}
+          userEmail={session.user.email}
+          campaigns={campaigns}
+          onRefreshCampaigns={refreshCampaigns}
+          onLogout={handleLogout}
+        />
       )}
       {pendingDelete && (
         <UndoToast
