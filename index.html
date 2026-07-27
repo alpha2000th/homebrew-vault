@@ -80,7 +80,9 @@ const ICON_MAP = { User, Crown, Skull, Ghost, Flame, Sparkles, Swords, Shield, C
 const ICON_NAMES = Object.keys(ICON_MAP);
 
 const LAST_OPEN_KEY = 'homebrew-vault-last-open-v1';
-const SCHEMA_VERSION = 1;
+// v2 adds optional structured combat metadata to actions. The four legacy
+// action fields remain valid and are still the only required shape.
+const SCHEMA_VERSION = 2;
 
 const SCHEMA_SNIPPET = `{
   // Only "name" is required — every other field is optional and will be
@@ -118,7 +120,14 @@ const SCHEMA_SNIPPET = `{
 
   "actions": [
     // "category" must be one of: action, bonus, reaction, legendary, lair
-    { "category": "action", "name": "Ember Lash", "cost": "", "description": "+9 to hit, 2d8+5 fire damage." },
+    {
+      "category": "action", "name": "Ember Lash", "cost": "", "description": "+9 to hit, 2d8+5 fire damage.",
+      "attackFormula": "1d20 + 9",
+      "damageFormulas": [{ "formula": "2d8 + 5", "type": "Fire" }],
+      "range": "10 ft", "targetType": "creature",
+      "resourceCosts": [],
+      "effects": []
+    },
     { "category": "legendary", "name": "Detect", "cost": "Costs 1 Legendary Action", "description": "Makes a Wisdom (Perception) check." }
   ],
   "legendaryActionsPerRound": 3,                // 0 if the character has none; the UI hides the tracker when 0
@@ -311,6 +320,23 @@ function normalizeImportedCharacter(raw) {
       name: asString(a.name, 'Action'),
       cost: asString(a.cost),
       description: asString(a.description),
+      // Schema v2: all fields below are optional. Keeping them absent is
+      // intentional for old files and description-only homebrew actions.
+      ...(asString(a.attackFormula) ? { attackFormula: a.attackFormula } : {}),
+      ...(Array.isArray(a.damageFormulas) ? {
+        damageFormulas: a.damageFormulas
+          .filter(isPlainObject)
+          .map((d) => ({ formula: asString(d.formula), type: asString(d.type) }))
+          .filter((d) => d.formula)
+      } : {}),
+      ...(asString(a.healingFormula) ? { healingFormula: a.healingFormula } : {}),
+      ...(asString(a.saveAbility) ? { saveAbility: a.saveAbility } : {}),
+      ...(typeof a.saveDc === 'number' ? { saveDc: a.saveDc } : {}),
+      ...(Array.isArray(a.resourceCosts) ? { resourceCosts: a.resourceCosts.filter(isPlainObject) } : {}),
+      ...(asString(a.range) ? { range: a.range } : {}),
+      ...(isPlainObject(a.area) ? { area: a.area } : {}),
+      ...(asString(a.targetType) ? { targetType: a.targetType } : {}),
+      ...(Array.isArray(a.effects) ? { effects: a.effects.filter(isPlainObject) } : {}),
     })),
     legendaryActionsPerRound: Math.max(0, asNumber(raw.legendaryActionsPerRound, 0)),
     legendaryActionsUsed: 0,
@@ -3664,5 +3690,6 @@ function HomebrewVaultApp() {
 
 ReactDOM.createRoot(document.getElementById("root")).render(<HomebrewVaultApp />);
 </script>
+<script type="module" src="/src/main.tsx"></script>
 </body>
 </html>
