@@ -1,5 +1,12 @@
 # Supabase deployment and verification
 
+## Guided combat payload status
+
+The guided flow requires no new remote migration. Its additive versioned
+structure is stored in the existing `combat_proposals.roll_data` JSONB column,
+then transformed into the existing secure `resolve_combat_proposal` RPC
+payload. No remote Supabase migration is applied for this feature.
+
 ## Prerequisites
 
 - Supabase CLI authenticated to the intended project

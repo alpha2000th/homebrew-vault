@@ -1,5 +1,35 @@
 # Combat Playtest Report
 
+## Guided action baseline and retest
+
+### Baseline failures
+
+The previous Actions panel exposed category selection, ability detail, attack,
+save, all damage components, healing, temporary HP, area controls, targets,
+conditions, and Submit in one continuous technical form. Observed failures:
+
+- No clear first command or current decision
+- Attack and damage visually adjacent and easy to confuse
+- Healing and temporary-HP inputs shown for unrelated attacks
+- Dense category and ability controls
+- Long scrolling through unrelated fields
+- No clean review gate before submission
+- Legacy actions sharing an ambiguous generic form
+- No five-entry Multiattack proposal
+- Resource costs displayed but absent from atomic proposed resolution
+- DM review emphasizing flat totals before source components
+
+### Guided retest
+
+Playwright used isolated DM and player contexts with the Tarrasque, Combat QA
+Titan, and a third target. It verified the large command menu, category
+filtering, ability detail, synchronized numbered targeting, separate
+attack/save/area/damage/healing/temp-HP/utility/review stages, `Awaiting DM`
+outcomes, extra dice and flat bonuses, cancellation confirmation, versioned
+source breakdown, DM component edits, deferred resource deduction, undo,
+five separate Tarrasque Multiattack entries with different targets and a miss,
+DM Direct Resolution, and mobile panel switching at 390×844.
+
 ## Scope and safety
 
 - Branch: `fix/combat-playtest-usability`
