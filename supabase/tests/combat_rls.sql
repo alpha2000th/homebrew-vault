@@ -54,16 +54,21 @@ select lives_ok(
   )$$,
   'assigned player may move token'
 );
-select throws_ok(
-  $$update public.combat_tokens set state = jsonb_set(state, '{hp,current}', '0') where id = '30000000-0000-0000-0000-000000000001'$$,
-  '42501',
-  null,
+with updated as (
+  update public.combat_tokens
+  set state = jsonb_set(state, '{hp,current}', '0')
+  where id = '30000000-0000-0000-0000-000000000001'
+  returning 1
+)
+select is(
+  (select count(*) from updated),
+  0::bigint,
   'player cannot directly modify HP'
 );
 
 select set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-000000000003', true);
 select ok(public.is_combat_member('20000000-0000-0000-0000-000000000001'), 'different member recognized');
-select nok(public.controls_combat_token('30000000-0000-0000-0000-000000000001'), 'different member does not control token');
+select ok(not public.controls_combat_token('30000000-0000-0000-0000-000000000001'), 'different member does not control token');
 select throws_ok(
   $$select public.move_combat_token(
     '30000000-0000-0000-0000-000000000001', 3, 3, null
@@ -74,7 +79,7 @@ select throws_ok(
 );
 
 select set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-000000000004', true);
-select nok(public.is_combat_member('20000000-0000-0000-0000-000000000001'), 'outsider is not a member');
+select ok(not public.is_combat_member('20000000-0000-0000-0000-000000000001'), 'outsider is not a member');
 select is((select count(*) from public.combat_encounters where id = '20000000-0000-0000-0000-000000000001'), 0::bigint, 'outsider cannot read encounter');
 select is((select count(*) from public.combat_tokens where encounter_id = '20000000-0000-0000-0000-000000000001'), 0::bigint, 'outsider cannot read tokens');
 
@@ -88,5 +93,5 @@ select lives_ok(
   'DM direct resolution succeeds'
 );
 
-select * from finish();
+select * from finish(true);
 rollback;
