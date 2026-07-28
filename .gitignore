@@ -4,7 +4,10 @@ dist/
 .env
 .env.*
 !.env.example
+!.env.e2e
 coverage/
+playwright-report/
+test-results/
 .DS_Store
 npm-debug.log*
 pnpm-debug.log*

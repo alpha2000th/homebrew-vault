@@ -149,6 +149,126 @@ export interface RollResult {
   critical: boolean;
 }
 
+export type GuidedActionStep =
+  | 'choose_category'
+  | 'choose_ability'
+  | 'ability_detail'
+  | 'legacy_route'
+  | 'choose_targets'
+  | 'place_area'
+  | 'attack_roll'
+  | 'saving_throw'
+  | 'damage'
+  | 'healing'
+  | 'temporary_hp'
+  | 'utility_effects'
+  | 'multiattack'
+  | 'review'
+  | 'submitting'
+  | 'submitted';
+
+export type GuidedEffectRoute =
+  | 'attack'
+  | 'damage'
+  | 'saving_throw'
+  | 'healing'
+  | 'temporary_hp'
+  | 'utility'
+  | 'multiattack'
+  | 'custom';
+
+export type SuggestedOutcome = 'awaiting_dm' | 'hit' | 'miss' | 'success' | 'failure' | 'custom';
+
+export interface DamageComponent {
+  id: string;
+  formula: string;
+  damageType: string;
+  source: string;
+  roll: RollResult | null;
+  calculatedSubtotal: number;
+  playerOverride: number | null;
+  finalSubtotal: number;
+  criticalDoubling: boolean;
+  included: boolean;
+}
+
+export interface TargetOutcome {
+  tokenId: string;
+  roll: number | null;
+  suggestedOutcome: SuggestedOutcome;
+  damageMode: 'full' | 'half' | 'none' | 'custom';
+  customMultiplier: number | null;
+  customResult: string;
+  playerDamage: number | null;
+  dmFinalDamage?: number | null;
+}
+
+export interface HealingComponent {
+  formula: string;
+  roll: RollResult | null;
+  calculated: number;
+  playerOverride: number | null;
+  flatBonus: number;
+}
+
+export interface TemporaryHpComponent extends HealingComponent {
+  effectType: 'temporary_hp';
+}
+
+export interface UtilityEffect {
+  id: string;
+  kind: 'condition' | 'remove_condition' | 'movement' | 'resource' | 'summon' | 'map_object' | 'ongoing' | 'note';
+  text: string;
+  duration?: string;
+  saveEnds?: boolean;
+}
+
+export interface ProposedResourceCost {
+  resourceId?: string;
+  name: string;
+  amount: number;
+  timing: 'on_resolution';
+}
+
+export interface AttackEntry {
+  id: string;
+  name: string;
+  sourceActionId?: string;
+  targetIds: string[];
+  attackFormula: string;
+  attackRoll: RollResult | null;
+  attackOverride: number | null;
+  suggestedOutcome: SuggestedOutcome;
+  damageComponents: DamageComponent[];
+  effects: UtilityEffect[];
+  skipped: boolean;
+}
+
+export interface GuidedActionDraft {
+  schemaVersion: 2;
+  encounterId: string;
+  actorTokenId: string;
+  category: ActionCategoryName | 'movement' | 'custom';
+  step: GuidedActionStep;
+  history: GuidedActionStep[];
+  sourceAction: CombatAction | null;
+  legacyRoute: GuidedEffectRoute | null;
+  targetIds: string[];
+  targetOutcomes: Record<string, TargetOutcome>;
+  areaTemplate: AreaTemplate | null;
+  attackEntry: AttackEntry | null;
+  multiattackEntries: AttackEntry[];
+  damageComponents: DamageComponent[];
+  healing: HealingComponent | null;
+  temporaryHp: TemporaryHpComponent | null;
+  utilityEffects: UtilityEffect[];
+  resourceCosts: ProposedResourceCost[];
+  note: string;
+  updatedAt: string;
+}
+
+export type ActionCategoryName = CombatAction['category'];
+
 export interface ResolutionTarget {
   token_id: string;
   damage?: number;

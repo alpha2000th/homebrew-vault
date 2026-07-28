@@ -75,7 +75,7 @@ function EncounterCreate({ session, onCreated, onCancel }: {
         finally { setBusy(false); }
       }}>
         <header><div><Swords /><h2>Create encounter</h2></div><button type="button" onClick={onCancel}><X /></button></header>
-        <label>Name<input required value={name} onChange={(event) => setName(event.target.value)} /></label>
+        <label>Name<input required value={name} onChange={(event) => setName(event.target.value)} data-testid="encounter-name" /></label>
         <label>Campaign (optional)<select value={campaignId} onChange={(event) => setCampaignId(event.target.value)}>
           <option value="">No linked campaign</option>
           {campaigns.map((campaign) => <option key={campaign.id} value={campaign.id}>{campaign.name}</option>)}
@@ -95,7 +95,7 @@ function EncounterCreate({ session, onCreated, onCancel }: {
           <label>Feet / square<input type="number" min="1" max="100" value={feet} onChange={(event) => setFeet(Number(event.target.value))} /></label>
         </div>
         {error && <p className="combat-error">{error}</p>}
-        <footer><button type="button" onClick={onCancel}>Cancel</button><button className="primary" disabled={busy}>{busy ? 'Creating…' : 'Create encounter'}</button></footer>
+        <footer><button type="button" onClick={onCancel}>Cancel</button><button className="primary" disabled={busy} data-testid="create-encounter">{busy ? 'Creating…' : 'Create encounter'}</button></footer>
       </form>
     </div>
   );
@@ -114,6 +114,7 @@ function SetupModal({ encounter, map, tokens, onClose, onRefresh, onMap, onError
   const [profiles, setProfiles] = useState<Awaited<ReturnType<typeof listProfiles>>>([]);
   const [characterId, setCharacterId] = useState('');
   const [assigned, setAssigned] = useState('');
+  const [team, setTeam] = useState('heroes');
   const [npcName, setNpcName] = useState('Goblin');
   const [npcHp, setNpcHp] = useState(7);
   const [busy, setBusy] = useState(false);
@@ -171,25 +172,28 @@ function SetupModal({ encounter, map, tokens, onClose, onRefresh, onMap, onError
         <section>
           <h3>Load Vault character</h3>
           <div className="setup-add-row">
-            <select value={characterId} onChange={(event) => setCharacterId(event.target.value)}>
+            <select aria-label="Vault character" value={characterId} onChange={(event) => setCharacterId(event.target.value)}>
               {characters.map((character) => <option key={character.id} value={character.id}>{character.data.name}</option>)}
             </select>
-            <select value={assigned} onChange={(event) => setAssigned(event.target.value)}>
+            <select aria-label="Assigned player" value={assigned} onChange={(event) => setAssigned(event.target.value)}>
               <option value="">Unassigned / DM</option>
               {profiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.display_name || profile.email}</option>)}
             </select>
+            <select aria-label="Combat team" value={team} onChange={(event) => setTeam(event.target.value)}>
+              <option value="heroes">Heroes</option><option value="enemies">Enemies</option><option value="neutral">Neutral</option>
+            </select>
             <button disabled={busy || !characterId} onClick={() => perform(async () => {
               const character = characters.find((item) => item.id === characterId);
-              if (character) await addVaultToken(encounter.id, character, assigned || null, { x: tokens.length % 10, y: Math.floor(tokens.length / 10) });
-            })}><Plus /> Add</button>
+              if (character) await addVaultToken(encounter.id, character, assigned || null, { x: tokens.length % 10, y: Math.floor(tokens.length / 10) }, team);
+            })} data-testid="add-vault-character"><Plus /> Add</button>
           </div>
         </section>
         <section>
           <h3>Temporary NPC</h3>
           <div className="setup-add-row">
-            <input value={npcName} onChange={(event) => setNpcName(event.target.value)} placeholder="Name" />
-            <input type="number" min="1" value={npcHp} onChange={(event) => setNpcHp(Number(event.target.value))} />
-            <button disabled={busy} onClick={() => perform(() => addTemporaryToken(encounter.id, { name: npcName, hp: npcHp, assignedUserId: assigned || null }))}><Plus /> Add NPC</button>
+            <input value={npcName} onChange={(event) => setNpcName(event.target.value)} placeholder="Name" data-testid="npc-name" />
+            <input type="number" min="1" value={npcHp} onChange={(event) => setNpcHp(Number(event.target.value))} data-testid="npc-hp" />
+            <button disabled={busy} onClick={() => perform(() => addTemporaryToken(encounter.id, { name: npcName, hp: npcHp, assignedUserId: assigned || null, team }))} data-testid="add-npc"><Plus /> Add NPC</button>
           </div>
         </section>
         <section>
@@ -200,7 +204,7 @@ function SetupModal({ encounter, map, tokens, onClose, onRefresh, onMap, onError
               <button onClick={() => perform(() => deleteToken(token.id))}>Remove</button></div>)}
           </div>
         </section>
-        <footer><button className="primary" onClick={onClose}>Done</button></footer>
+        <footer><button className="primary" onClick={onClose} data-testid="setup-done">Done</button></footer>
       </div>
     </div>
   );
@@ -211,10 +215,20 @@ function EncounterView({ encounterId, session, onBack }: { encounterId: string; 
   const [showSetup, setShowSetup] = useState(false);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [targetIds, setTargetIds] = useState<string[]>([]);
+  const [actorId, setActorId] = useState('');
+  const [targetMode, setTargetMode] = useState(false);
+  const [focusRequest, setFocusRequest] = useState<{ id: string; nonce: number } | null>(null);
   const [areaTemplate, setAreaTemplate] = useState<AreaTemplate | null>(null);
   const [mobileView, setMobileView] = useState<'map' | 'panel'>('map');
   const encounter = combat.encounter;
   const isDm = encounter?.dm_user_id === session.user.id;
+
+  useEffect(() => {
+    const actors = combat.tokens.filter((token) => isDm || token.assigned_user_id === session.user.id);
+    if (!actors.some((token) => token.id === actorId)) setActorId(actors[0]?.id ?? '');
+  }, [combat.tokens, isDm, session.user.id, actorId]);
+
+  const focusToken = (id: string) => setFocusRequest((current) => ({ id, nonce: (current?.nonce ?? 0) + 1 }));
 
   if (combat.loading) return <div className="combat-loading">Loading shared encounter…</div>;
   if (!encounter) return <div className="combat-loading"><p>{combat.error || 'Encounter is unavailable.'}</p><button onClick={onBack}>Back</button></div>;
@@ -228,7 +242,10 @@ function EncounterView({ encounterId, session, onBack }: { encounterId: string; 
           {combat.connection === 'live' ? <><Wifi /> Live</> : <><WifiOff /> Reconnecting</>}
           <span><Users /> {combat.onlineUsers.length} online</span>
         </div>
-        {isDm && <button onClick={() => setShowSetup(true)}><Settings /><span>Setup</span></button>}
+        <button className={targetMode ? 'targeting-button active' : 'targeting-button'} onClick={() => setTargetMode((active) => !active)} title="Click map tokens to add or remove targets">
+          <Swords /><span>{targetMode ? 'Targeting On' : 'Select Targets'}</span>
+        </button>
+        {isDm && <button onClick={() => setShowSetup(true)} data-testid="open-setup"><Settings /><span>Setup</span></button>}
         <button className="mobile-switch" onClick={() => setMobileView((view) => view === 'map' ? 'panel' : 'map')}>
           {mobileView === 'map' ? <><Menu /> Combat panel</> : <><MapIcon /> Map</>}
         </button>
@@ -243,6 +260,9 @@ function EncounterView({ encounterId, session, onBack }: { encounterId: string; 
           isDm={isDm}
           selectedIds={selectedIds}
           targetIds={targetIds}
+          actorId={actorId}
+          targetMode={targetMode}
+          focusRequest={focusRequest}
           areaTemplate={areaTemplate}
           onSelect={(id, addTarget) => {
             setSelectedIds([id]);
@@ -252,16 +272,24 @@ function EncounterView({ encounterId, session, onBack }: { encounterId: string; 
         />
         <CombatPanel
           encounter={encounter}
+          map={combat.map}
           tokens={combat.tokens}
           proposals={combat.proposals}
           reactions={combat.reactions}
           events={combat.events}
           userId={session.user.id}
           isDm={isDm}
+          actorId={actorId}
+          selectedIds={selectedIds}
           targetIds={targetIds}
           areaTemplate={areaTemplate}
+          targetMode={targetMode}
+          onActorId={setActorId}
+          onSelectedIds={setSelectedIds}
           onTargetIds={setTargetIds}
           onAreaTemplate={setAreaTemplate}
+          onTargetMode={setTargetMode}
+          onFocusToken={focusToken}
           onRefresh={combat.reload}
           onError={(value) => combat.setError(value)}
         />
@@ -292,14 +320,14 @@ function EncounterHome({ session, onOpen, onClose }: {
         <button onClick={onClose}><X /> Return to Vault</button></header>
       <main>
         <div className="combat-home-title"><div><h1>Your encounters</h1><p>Persistent tactical maps, permissive calculations, and DM-controlled resolutions.</p></div>
-          <button className="primary" onClick={() => setCreating(true)}><Plus /> New encounter</button></div>
+          <button className="primary" onClick={() => setCreating(true)} data-testid="new-encounter"><Plus /> New encounter</button></div>
         {error && <div className="combat-migration-warning">
           <Shield /><div><strong>Combat database is not ready</strong><p>{error}</p><small>Apply the versioned Supabase migration in this branch, then reload.</small></div>
         </div>}
         {loading ? <div className="combat-loading">Loading encounters…</div> : (
           <div className="encounter-grid">
             {encounters.map((encounter) => (
-              <button key={encounter.id} onClick={() => onOpen(encounter.id)}>
+              <button key={encounter.id} onClick={() => onOpen(encounter.id)} data-testid={`encounter-card-${encounter.id}`}>
                 <span className={`encounter-status status-${encounter.status}`}>{encounter.status}</span>
                 <Swords /><strong>{encounter.name}</strong>
                 <small>{encounter.turn_mode} mode · round {encounter.round_number}</small>
@@ -324,9 +352,15 @@ export function CombatLauncher() {
     const { data } = supabase.auth.onAuthStateChange((_event, next) => setSession(next));
     return () => data.subscription.unsubscribe();
   }, []);
+  useEffect(() => {
+    if (!open) return;
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = previous; };
+  }, [open]);
   const close = () => { setOpen(false); setEncounterId(null); };
   if (!session) return null;
-  if (!open) return <button className="combat-launcher" onClick={() => setOpen(true)}><Swords /><span>Combat</span></button>;
+  if (!open) return <button className="combat-launcher" onClick={() => setOpen(true)} data-testid="combat-launcher"><Swords /><span>Combat</span></button>;
   return (
     <CombatErrorBoundary onClose={close}>
       <div className="combat-portal">

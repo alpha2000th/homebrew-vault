@@ -1,5 +1,18 @@
 # Combat architecture
 
+## Guided action interface
+
+The Actions panel is a progressive command state machine documented in
+[GUIDED_COMBAT_FLOW.md](./GUIDED_COMBAT_FLOW.md). Structured player intent is
+stored as a version-2 guided draft inside the existing proposal JSONB payload.
+See [CHARACTER_ACTION_SCHEMA.md](./CHARACTER_ACTION_SCHEMA.md) and
+[PROPOSAL_PAYLOAD.md](./PROPOSAL_PAYLOAD.md).
+
+Resource costs are proposed in the resolution payload and applied only by the
+existing server-side DM resolution transaction. Cancellation, rejection,
+return-for-edit, idempotency, undo, and canonical synchronization therefore
+share the established combat trust boundary.
+
 ## Trust boundary
 
 The browser is a collaborative editor and preview surface, not the final
