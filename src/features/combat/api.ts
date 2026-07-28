@@ -1,17 +1,23 @@
 import type {
   AreaTemplate,
   CombatEncounter,
-  CombatEvent,
   CombatMap,
   CombatProposal,
   CombatToken,
   EncounterStatus,
-  ReactionWindow,
   ResolutionPayload,
   TurnMode,
   CombatAction,
 } from '../../types/combat';
 import { migrateCharacterData } from '../../lib/combat/characterSchema';
+import {
+  normalizeCombatEncounter,
+  normalizeCombatEvent,
+  normalizeCombatMap,
+  normalizeCombatProposal,
+  normalizeCombatToken,
+  normalizeReactionWindow,
+} from '../../lib/combat/runtimeSchema';
 import { supabase } from '../../lib/supabase/client';
 
 const throwIf = (error: { message: string } | null) => {
@@ -24,7 +30,7 @@ export async function listEncounters(): Promise<CombatEncounter[]> {
     .select('*')
     .order('updated_at', { ascending: false });
   throwIf(error);
-  return (data ?? []) as CombatEncounter[];
+  return (data ?? []).map((row) => normalizeCombatEncounter(row));
 }
 
 export async function createEncounter(input: {
@@ -47,7 +53,7 @@ export async function createEncounter(input: {
   });
   throwIf(error);
   if (!data) throw new Error('Supabase did not return the new encounter.');
-  return data as unknown as CombatEncounter;
+  return normalizeCombatEncounter(data);
 }
 
 export async function loadEncounterBundle(encounterId: string) {
@@ -62,18 +68,18 @@ export async function loadEncounterBundle(encounterId: string) {
       .order('created_at', { ascending: false }).limit(300),
   ]);
   [encounter.error, map.error, tokens.error, proposals.error, reactions.error, events.error].forEach(throwIf);
-  let combatMap = map.data as CombatMap | null;
+  let combatMap = normalizeCombatMap(map.data);
   if (combatMap?.storage_path) {
     const signed = await supabase.storage.from('combat-maps').createSignedUrl(combatMap.storage_path, 3600);
     if (!signed.error) combatMap = { ...combatMap, signedUrl: signed.data.signedUrl };
   }
   return {
-    encounter: encounter.data as CombatEncounter,
+    encounter: normalizeCombatEncounter(encounter.data),
     map: combatMap,
-    tokens: (tokens.data ?? []) as CombatToken[],
-    proposals: (proposals.data ?? []) as CombatProposal[],
-    reactions: (reactions.data ?? []) as unknown as ReactionWindow[],
-    events: (events.data ?? []) as CombatEvent[],
+    tokens: (tokens.data ?? []).map((row) => normalizeCombatToken(row)),
+    proposals: (proposals.data ?? []).map((row) => normalizeCombatProposal(row)),
+    reactions: (reactions.data ?? []).map((row) => normalizeReactionWindow(row)),
+    events: (events.data ?? []).map((row) => normalizeCombatEvent(row)),
   };
 }
 
@@ -129,7 +135,7 @@ export async function addVaultToken(
     state,
   }).select().single();
   throwIf(error);
-  return data as CombatToken;
+  return normalizeCombatToken(data);
 }
 
 export async function addTemporaryToken(
@@ -159,7 +165,7 @@ export async function addTemporaryToken(
     },
   }).select().single();
   throwIf(error);
-  return data as CombatToken;
+  return normalizeCombatToken(data);
 }
 
 export async function deleteToken(tokenId: string) {
@@ -175,7 +181,7 @@ export async function moveToken(tokenId: string, x: number, y: number, expectedU
     p_expected_updated_at: expectedUpdatedAt,
   });
   throwIf(error);
-  return data as CombatToken;
+  return normalizeCombatToken(data);
 }
 
 export async function updateEncounter(
@@ -184,7 +190,7 @@ export async function updateEncounter(
 ) {
   const { data, error } = await supabase.from('combat_encounters').update(patch).eq('id', encounterId).select().single();
   throwIf(error);
-  return data as CombatEncounter;
+  return normalizeCombatEncounter(data);
 }
 
 export async function advanceCombatRound(encounterId: string, direction = 1) {
@@ -193,13 +199,13 @@ export async function advanceCombatRound(encounterId: string, direction = 1) {
     p_direction: direction,
   });
   throwIf(error);
-  return data as CombatEncounter;
+  return normalizeCombatEncounter(data);
 }
 
 export async function updateTokenAsDm(tokenId: string, patch: Partial<CombatToken>) {
   const { data, error } = await supabase.from('combat_tokens').update(patch).eq('id', tokenId).select().single();
   throwIf(error);
-  return data as CombatToken;
+  return normalizeCombatToken(data);
 }
 
 export async function uploadCombatMap(encounterId: string, file: File) {
@@ -223,13 +229,15 @@ export async function uploadCombatMap(encounterId: string, file: File) {
   const signed = await supabase.storage.from('combat-maps').createSignedUrl(path, 3600);
   throwIf(signed.error);
   if (!signed.data) throw new Error('Could not create a signed map URL.');
-  return { ...(data as CombatMap), signedUrl: signed.data.signedUrl };
+  return normalizeCombatMap({ ...data, signedUrl: signed.data.signedUrl })!;
 }
 
 export async function updateMap(encounterId: string, patch: Partial<CombatMap>) {
   const { data, error } = await supabase.from('combat_maps').update(patch).eq('encounter_id', encounterId).select().single();
   throwIf(error);
-  return data as CombatMap;
+  const normalized = normalizeCombatMap(data);
+  if (!normalized) throw new Error('Supabase did not return the updated map.');
+  return normalized;
 }
 
 export async function saveDraft(input: {
@@ -260,7 +268,7 @@ export async function saveDraft(input: {
     description: input.description,
   }).select().single();
   throwIf(error);
-  return data as CombatProposal;
+  return normalizeCombatProposal(data);
 }
 
 export async function submitProposal(proposalId: string, expectedVersion: number) {
@@ -269,7 +277,7 @@ export async function submitProposal(proposalId: string, expectedVersion: number
     p_expected_version: expectedVersion,
   });
   throwIf(error);
-  return data as CombatProposal;
+  return normalizeCombatProposal(data);
 }
 
 export async function resolveProposal(
@@ -328,7 +336,7 @@ export async function createReactionWindow(input: {
     created_by: auth.user?.id,
   }).select().single();
   throwIf(error);
-  return data as ReactionWindow;
+  return normalizeReactionWindow(data);
 }
 
 export async function respondToReaction(input: {
@@ -370,7 +378,7 @@ export async function sendChat(encounterId: string, message: string) {
     created_by: auth.user?.id,
   }).select().single();
   throwIf(error);
-  return data as CombatEvent;
+  return normalizeCombatEvent(data);
 }
 
 export async function setEncounterStatus(encounterId: string, status: EncounterStatus) {
