@@ -1,21 +1,24 @@
 import type { HpState, ResolutionPayload, ResolutionTarget, ResourcePool } from '../../types/combat';
+import { normalizeHpState, normalizeResolutionPayload } from './runtimeSchema';
 
 export function applyDamage(hp: HpState, damage: number): HpState {
+  const safeHp = normalizeHpState(hp);
   const amount = Math.max(0, Number(damage) || 0);
-  const absorbed = Math.min(hp.temp, amount);
+  const absorbed = Math.min(safeHp.temp, amount);
   return {
-    ...hp,
-    temp: hp.temp - absorbed,
-    current: Math.max(0, hp.current - (amount - absorbed)),
+    ...safeHp,
+    temp: safeHp.temp - absorbed,
+    current: Math.max(0, safeHp.current - (amount - absorbed)),
   };
 }
 
 export function applyHealing(hp: HpState, healing: number): HpState {
-  return { ...hp, current: Math.min(hp.max, hp.current + Math.max(0, Number(healing) || 0)) };
+  const safeHp = normalizeHpState(hp);
+  return { ...safeHp, current: Math.min(safeHp.max, safeHp.current + Math.max(0, Number(healing) || 0)) };
 }
 
 export function applyHpChanges(hp: HpState, change: ResolutionTarget): HpState {
-  let next = { ...hp };
+  let next = normalizeHpState(hp);
   if (change.set_max_hp !== undefined) {
     next.max = Math.max(1, change.set_max_hp);
     next.current = Math.min(next.current, next.max);
@@ -46,14 +49,18 @@ export function effectivePayload(
   playerOverride?: ResolutionPayload | null,
   dmFinal?: ResolutionPayload | null,
 ): { payload: ResolutionPayload; source: 'calculated' | 'player' | 'dm' } {
-  if (dmFinal?.targets?.length) return { payload: dmFinal, source: 'dm' };
-  if (playerOverride?.targets?.length) return { payload: playerOverride, source: 'player' };
-  return { payload: calculated, source: 'calculated' };
+  const safeCalculated = normalizeResolutionPayload(calculated);
+  const safePlayer = normalizeResolutionPayload(playerOverride);
+  const safeDm = normalizeResolutionPayload(dmFinal);
+  if (safeDm.targets.length) return { payload: safeDm, source: 'dm' };
+  if (safePlayer.targets.length) return { payload: safePlayer, source: 'player' };
+  return { payload: safeCalculated, source: 'calculated' };
 }
 
 export function previewTarget(
   hp: HpState,
   change: ResolutionTarget,
 ): { before: HpState; after: HpState } {
-  return { before: { ...hp }, after: applyHpChanges(hp, change) };
+  const safeHp = normalizeHpState(hp);
+  return { before: safeHp, after: applyHpChanges(safeHp, change) };
 }

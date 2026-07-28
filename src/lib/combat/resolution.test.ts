@@ -19,6 +19,13 @@ describe('combat resolution math', () => {
       .toEqual({ current: 100, max: 100, temp: 7 });
   });
 
+  it('uses safe HP defaults when legacy runtime data is incomplete', () => {
+    expect(applyDamage(undefined as never, 5))
+      .toEqual({ current: 0, max: 1, temp: 0 });
+    expect(previewTarget(undefined as never, { token_id: 'target', healing: 5 }).after)
+      .toEqual({ current: 1, max: 1, temp: 0 });
+  });
+
   it('supports direct DM changes and explicit HP override', () => {
     const result = applyHpChanges(
       { current: 50, max: 100, temp: 10 },
