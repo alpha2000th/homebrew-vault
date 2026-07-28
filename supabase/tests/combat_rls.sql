@@ -3,7 +3,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
-select plan(14);
+select plan(15);
 
 insert into auth.users(id, email) values
   ('10000000-0000-0000-0000-000000000001', 'dm@example.test'),
@@ -38,6 +38,22 @@ values (
 
 select ok(public.is_combat_dm('20000000-0000-0000-0000-000000000001'), 'DM recognized');
 select ok(public.is_combat_member('20000000-0000-0000-0000-000000000001'), 'DM is a member');
+select is(
+  (
+    select dm_user_id
+    from public.create_combat_encounter(
+      'RPC ownership test',
+      null,
+      'initiative',
+      'stone',
+      24,
+      18,
+      5
+    )
+  ),
+  auth.uid(),
+  'encounter RPC derives DM ownership from the authenticated caller'
+);
 select lives_ok(
   $$select public.move_combat_token(
     '30000000-0000-0000-0000-000000000001', 1, 1, null

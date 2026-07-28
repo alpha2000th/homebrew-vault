@@ -36,31 +36,18 @@ export async function createEncounter(input: {
   rows: number;
   feetPerSquare: number;
 }): Promise<CombatEncounter> {
-  const { data: auth } = await supabase.auth.getUser();
-  if (!auth.user) throw new Error('Sign in before creating an encounter.');
-  const { data, error } = await supabase
-    .from('combat_encounters')
-    .insert({
-      name: input.name.trim() || 'New Encounter',
-      campaign_id: input.campaignId || null,
-      dm_user_id: auth.user.id,
-      turn_mode: input.turnMode,
-      settings: { showRoundInFreeMode: true },
-    })
-    .select()
-    .single();
-  throwIf(error);
-  const encounter = data as CombatEncounter;
-  const { error: mapError } = await supabase.from('combat_maps').insert({
-    encounter_id: encounter.id,
-    map_type: 'preset',
-    preset_name: input.preset ?? 'blank',
-    grid_columns: input.columns,
-    grid_rows: input.rows,
-    feet_per_square: input.feetPerSquare,
+  const { data, error } = await supabase.rpc('create_combat_encounter', {
+    p_name: input.name,
+    p_campaign_id: input.campaignId || null,
+    p_turn_mode: input.turnMode,
+    p_preset_name: input.preset ?? 'blank',
+    p_grid_columns: input.columns,
+    p_grid_rows: input.rows,
+    p_feet_per_square: input.feetPerSquare,
   });
-  throwIf(mapError);
-  return encounter;
+  throwIf(error);
+  if (!data) throw new Error('Supabase did not return the new encounter.');
+  return data as unknown as CombatEncounter;
 }
 
 export async function loadEncounterBundle(encounterId: string) {
