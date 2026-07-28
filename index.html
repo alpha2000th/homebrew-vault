@@ -43,6 +43,8 @@ import {
 const SUPABASE_URL = 'https://psmzewaofkvwujccmlrv.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_KUoetV_StYUXdpd-rxMzZA_Zi84ycQ7';
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+window.homebrewVaultSupabase = supabase;
+window.dispatchEvent(new CustomEvent('homebrew-supabase-ready', { detail: supabase }));
 
 // ============================================================
 // CONSTANTS
