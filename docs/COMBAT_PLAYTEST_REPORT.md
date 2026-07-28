@@ -185,3 +185,114 @@ This report was created before product-code changes. Its initial findings below 
 - Screenshots: pending isolated pre-fix and post-fix playtest.
 - Playwright HTML report: pending.
 
+## Final retest — 2026-07-28
+
+The baseline sections above remain the immutable pre-change record. This section is the authoritative post-change result.
+
+### Final environment
+
+- Branch: `fix/combat-playtest-usability`
+- Application: actual React UI running through Vite in `e2e` mode
+- Browser automation: Playwright 1.62, Chromium
+- Isolated accounts:
+  - DM: `dm@combat.test` (`QA Dungeon Master`)
+  - Player: `player@combat.test` (`QA Player`)
+  - Third context: `spectator@combat.test` (`QA Spectator`)
+- Encounter: `Tarrasque Full Fight QA`
+- Combatants:
+  - `Tarrasque`, CR 30, DM-controlled
+  - `Combat QA Titan`, CR 30, player-controlled
+  - `QA Observer`, third-context participant used for multi-target and permission coverage
+- Viewports exercised: 1920×1080, 1440×900, 1366×768, 1280×720, 768×1024, and 390×844
+- Production remained read-only throughout.
+- Because Docker, WSL, and local PostgreSQL were unavailable, the safe environment uses a test-only in-memory Supabase-compatible service on `127.0.0.1:4184`. The actual application runs on `127.0.0.1:4183`.
+
+### Issue disposition
+
+| Issue | Final status | Fix and browser retest |
+|---|---|---|
+| CP-001 Hidden Shift-click targeting | **Fixed** | Added explicit map targeting mode, target cursor/state, outlines/order badges, Clear Targets, help, and synchronized panel checkboxes. Retested from the map and panel. |
+| CP-002 Actor/map disconnect | **Fixed** | Lifted actor state to the encounter, added actor state/resources and focus control, and gave the map actor an unmistakable non-color treatment. |
+| CP-003 Flat action list | **Fixed** | Added counted Actions, Bonus, Reactions, Legendary, Lair, Powers, and Custom categories with useful empty explanations. Every category was opened in Chromium. |
+| CP-004 Attack/damage conflation | **Fixed** | Added independent attack, save, multi-component damage, healing, and temp-HP calculators. Attack override 37 and damage override 60 stayed separate through submission and history. |
+| CP-005 Incomplete action details | **Fixed** | Detail card exposes category, cost, description, range, targets, save, resources, attack, damage, healing, and effects. Legacy Overload detected editable formulas without mutating source data. |
+| CP-006 DM tab lacks target selector | **Fixed** | Added searchable DM targets, ally/enemy helpers, focus, current state, distance, and per-target before/final previews. Exact 60 direct damage was applied and undone. |
+| CP-007 First-target-only proposal review | **Fixed** | Added an editable card for every target, bulk/half tools, add/remove, independent final values, previews, summary, Resolve all, Reject, and Return for edits. Gravity Wave used two edited targets. |
+| CP-008 Weak empty tabs | **Fixed** | Added useful empty states and counters; the DM tab is absent for player and spectator contexts. Empty Proposals, Reactions, and Chat were verified before history existed. |
+| CP-009 Reaction workflow unverified | **Fixed** | Broad trigger, recorded reaction, custom response, Pass, Ask DM, trigger editing, eligibility controls, close, and continue were exercised across DM/player contexts. |
+| CP-010 Uncoordinated selection states | **Fixed** | Initiative and target rows select/focus map tokens; actor, selected, targeted, current-turn, ally/enemy, dead/unconscious states have distinct non-color cues. |
+| CP-011 Scroll reachability | **Fixed** | Locked the portal to `100dvh`, kept tabs and submit/resolve footers sticky, made tab content independently scrollable, constrained textareas, and blocked body scrolling. Bottom controls were reached at all required sizes and Submit/Resolve were clicked at 1366×768. |
+| CP-012 Preserve existing paths | **Fixed** | Encounter creation/setup, initiatives, map, chat, persistence, and reopening remained operational. |
+| CP-013 Refresh reset active context | **Fixed** | The playtest found that every save set the encounter back to loading, unmounting the workspace and resetting tab, scroll, actor, and targets. Refresh now keeps the workspace mounted after initial load. |
+| CP-014 Roll details absent from visible history | **Fixed** | Proposal history now presents final attack and player damage from the authenticated submit event. Chromium verified `Attack 37 · Damage 60` beside resolution history. |
+| CP-015 Reaction trigger write race | **Fixed** | The expanded test found the editable trigger wrote to the backend on every keystroke, allowing overlapping refreshes to race with eligibility edits. Trigger text now has a local draft and explicit Save action; trigger and eligible-token edits were retested together. |
+
+No issue remains partially fixed or deferred within the requested Combat scope.
+
+### Full UI scenario executed
+
+1. Reset only the isolated test service and opened independent DM, player, and spectator contexts.
+2. Created an encounter through the DM UI, loaded both reusable CR 30 fixtures, assigned the Titan to the player, left the Tarrasque with the DM, and added `QA Observer` for the third context.
+3. Selected both main tokens from initiative rows, verified map highlights, moved both through pointer interactions, targeted both from the map, verified panel synchronization, and cleared them.
+4. Set initiative, advanced turns, advanced to round 4, switched to Free Mode, and switched back.
+5. Opened all ability categories, counts, meaningful empties, legacy action detection, and structured action details.
+6. Used Prismatic Cleaver: edited individual components, added/removed a component, rolled attack and damage separately, overrode attack to 37 and damage to 60, and submitted.
+7. DM changed final damage to 65, resolved, observed Tarrasque HP 676→611 on both clients, undid, and observed 611→676.
+8. DM used Bite against the Titan, opened a damage reaction window, and the player submitted a recorded reaction, custom reaction, Pass, and Ask DM. DM edited the trigger and continued.
+9. Resolved Bite and confirmed 40 temporary HP absorbed the first 40 of 60 damage.
+10. Used Repair Pulse and resolved 15 healing.
+11. Used Gravity Wave, resized its area to 8×8, reviewed suggestions, manually added/removed targets, assigned independent save outcomes, submitted two targets, edited both DM cards, removed/re-added a target, and resolved.
+12. Used Aegis Buffer as a clearly labeled bonus action and applied 55 temporary HP.
+13. Used DM Direct Resolution for exactly 60 damage without a proposal, verified temp-HP absorption and final HP, then undid and verified restoration.
+14. Added and removed `Prone`, spent two QA Charges, restored one, and verified per-round recharge to 5/5.
+15. Applied one atomic direct resolution to Tarrasque and QA Observer and verified two previews and both client updates.
+16. Sent player and DM chat messages and verified synchronized proposal-roll and resolution history.
+17. Refreshed both browsers, reopened Combat, left/reopened the encounter, and verified persisted positions, HP/temp HP, resources, round/mode, and history.
+18. Verified a spectator cannot drag the DM-controlled Tarrasque and cannot see the DM tab.
+19. Repeated bottom-control reachability at every required desktop size; clicked sticky Submit and Resolve at 1366×768.
+20. Switched Map/Panel on 390×844 and reached the long Powers submit footer; reached direct Resolve on 768×1024.
+
+### Automated results
+
+- TypeScript: pass (`tsc --noEmit`)
+- Vitest: pass, 11 files / 35 tests
+- Playwright expanded full fight: pass, three contexts, 33.1 seconds in the final run
+- Playwright smoke/setup: pass
+- Full Playwright suite and production build: recorded in the final verification section below
+
+### Artifacts
+
+Generated by the successful Playwright run under:
+
+- `test-results/combat-full-fight-complete-3594f-multi-round-combat-playtest-chromium/`
+- `playwright-report/index.html`
+
+Successful-run screenshots include:
+
+- `dm-proposal-resolved-*.png`
+- `dm-1366-scroll-and-resolve-*.png`
+- `player-mobile-action-scroll-*.png`
+- `dm-tablet-direct-resolution-*.png`
+
+These directories are intentionally gitignored; `pnpm test:e2e` regenerates them.
+
+### Database and safety result
+
+- No production write was performed.
+- No RLS policy was weakened.
+- No database migration was required.
+- Production continues to use authenticated combat RPCs and existing RLS.
+- The fake client/server loads only when `VITE_COMBAT_E2E=true`.
+- The isolated service models membership, DM permissions, chat policy, and authenticated RPC behavior; it is not part of the production code path.
+
+### Final verification results
+
+- `tsc --noEmit`: **pass**
+- Vitest: **pass**, 11 test files / 35 tests
+- Playwright Chromium: **pass**, 2 scenarios / 2 tests
+  - Complete three-user, multi-round fight: pass
+  - DM encounter/setup smoke path: pass
+- Final Playwright suite duration: 41.0 seconds
+- Required viewports: **pass**
+- Production Vite build: **pass**, 1,639 modules transformed
+- Draft PR: added after push; intentionally not merged

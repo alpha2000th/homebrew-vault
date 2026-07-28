@@ -58,7 +58,8 @@ describe('MapBoard', () => {
   it('renders visible tactical state and allows target selection', () => {
     const onSelect = vi.fn();
     render(<MapBoard encounter={encounter} map={map} tokens={[token]} userId="player-b" isDm={false}
-      selectedIds={[]} targetIds={[]} areaTemplate={null} onSelect={onSelect} onMove={vi.fn()} />);
+      selectedIds={[]} targetIds={[]} actorId="" targetMode={false} focusRequest={null}
+      areaTemplate={null} onSelect={onSelect} onMove={vi.fn()} />);
     const tokenButton = screen.getByTitle('Alphy — 30/40 HP');
     expect(tokenButton).toHaveTextContent('Alphy');
     expect(tokenButton).toHaveTextContent('+5');
@@ -69,7 +70,8 @@ describe('MapBoard', () => {
   it('does not begin movement for a different player’s token', () => {
     const onMove = vi.fn();
     render(<MapBoard encounter={encounter} map={map} tokens={[token]} userId="player-b" isDm={false}
-      selectedIds={[]} targetIds={[]} areaTemplate={null} onSelect={vi.fn()} onMove={onMove} />);
+      selectedIds={[]} targetIds={[]} actorId="" targetMode={false} focusRequest={null}
+      areaTemplate={null} onSelect={vi.fn()} onMove={onMove} />);
     const tokenButton = screen.getByTitle('Alphy — 30/40 HP');
     fireEvent.pointerDown(tokenButton, { clientX: 10, clientY: 10 });
     fireEvent.pointerMove(tokenButton, { clientX: 100, clientY: 100 });

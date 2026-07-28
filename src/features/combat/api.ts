@@ -5,6 +5,7 @@ import type {
   CombatProposal,
   CombatToken,
   EncounterStatus,
+  ReactionWindow,
   ResolutionPayload,
   TurnMode,
   CombatAction,
@@ -103,6 +104,7 @@ export async function addVaultToken(
   character: { id: string; data: ReturnType<typeof migrateCharacterData> },
   assignedUserId: string | null,
   position: { x: number; y: number },
+  team = 'neutral',
 ) {
   if (assignedUserId) {
     const { error: memberError } = await supabase.from('combat_members').upsert({
@@ -130,6 +132,7 @@ export async function addVaultToken(
     character_id: character.id,
     assigned_user_id: assignedUserId,
     name: character.data.name,
+    team,
     x: position.x,
     y: position.y,
     state,
@@ -140,7 +143,7 @@ export async function addVaultToken(
 
 export async function addTemporaryToken(
   encounterId: string,
-  input: { name: string; hp: number; assignedUserId?: string | null; x?: number; y?: number },
+  input: { name: string; hp: number; assignedUserId?: string | null; team?: string; x?: number; y?: number },
 ) {
   if (input.assignedUserId) {
     const { error: memberError } = await supabase.from('combat_members').upsert({
@@ -153,6 +156,7 @@ export async function addTemporaryToken(
   const { data, error } = await supabase.from('combat_tokens').insert({
     encounter_id: encounterId,
     name: input.name.trim() || 'Temporary NPC',
+    team: input.team || 'neutral',
     assigned_user_id: input.assignedUserId || null,
     x: input.x ?? 0,
     y: input.y ?? 0,
@@ -280,6 +284,16 @@ export async function submitProposal(proposalId: string, expectedVersion: number
   return normalizeCombatProposal(data);
 }
 
+export async function updateProposalStatus(proposalId: string, status: CombatProposal['status']) {
+  const { data, error } = await supabase.from('combat_proposals')
+    .update({ status })
+    .eq('id', proposalId)
+    .select()
+    .single();
+  throwIf(error);
+  return normalizeCombatProposal(data);
+}
+
 export async function resolveProposal(
   proposal: CombatProposal,
   payload: ResolutionPayload,
@@ -366,6 +380,19 @@ export async function closeReactionWindow(windowId: string) {
     .eq('id', windowId).select().single();
   throwIf(error);
   return data;
+}
+
+export async function updateReactionWindow(
+  windowId: string,
+  patch: Partial<Pick<ReactionWindow, 'trigger_type' | 'trigger_text' | 'eligible_token_ids' | 'allow_additional'>>,
+) {
+  const { data, error } = await supabase.from('combat_reaction_windows')
+    .update(patch)
+    .eq('id', windowId)
+    .select()
+    .single();
+  throwIf(error);
+  return normalizeReactionWindow(data);
 }
 
 export async function sendChat(encounterId: string, message: string) {

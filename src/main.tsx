@@ -23,7 +23,11 @@ const mountCombat = (sharedClient: SupabaseClient) => {
   );
 };
 
-if (window.homebrewVaultSupabase) {
+if (import.meta.env.VITE_COMBAT_E2E === 'true') {
+  void import('./e2e/fakeSupabase').then(({ createCombatE2EClient }) => {
+    mountCombat(createCombatE2EClient());
+  });
+} else if (window.homebrewVaultSupabase) {
   mountCombat(window.homebrewVaultSupabase);
 } else {
   window.addEventListener('homebrew-supabase-ready', (event) => {

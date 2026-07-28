@@ -1,5 +1,5 @@
-import { useMemo, useRef, useState } from 'react';
-import { Crosshair, Minus, Plus, RotateCcw } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Crosshair, HelpCircle, Minus, Plus, RotateCcw, Target } from 'lucide-react';
 import type { AreaTemplate, CombatEncounter, CombatMap, CombatToken } from '../../types/combat';
 import { canMoveCombatToken } from '../../lib/combat/permissions';
 
@@ -11,6 +11,9 @@ interface Props {
   isDm: boolean;
   selectedIds: string[];
   targetIds: string[];
+  actorId: string;
+  targetMode: boolean;
+  focusRequest: { id: string; nonce: number } | null;
   areaTemplate: AreaTemplate | null;
   onSelect: (id: string, addTarget: boolean) => void;
   onMove: (token: CombatToken, x: number, y: number) => Promise<boolean>;
@@ -42,6 +45,9 @@ export function MapBoard({
   isDm,
   selectedIds,
   targetIds,
+  actorId,
+  targetMode,
+  focusRequest,
   areaTemplate,
   onSelect,
   onMove,
@@ -63,6 +69,9 @@ export function MapBoard({
   const rows = map?.grid_rows ?? 18;
   const feet = map?.feet_per_square ?? 5;
   const activeId = encounter.active_turn_token_id;
+  const actor = tokens.find((token) => token.id === actorId);
+  const selectedNames = selectedIds.map((id) => tokens.find((token) => token.id === id)?.name).filter(Boolean);
+  const targetNames = targetIds.map((id) => tokens.find((token) => token.id === id)?.name).filter(Boolean);
 
   const background = useMemo(() => {
     const grid = [
@@ -77,9 +86,20 @@ export function MapBoard({
 
   const canMove = (token: CombatToken) => canMoveCombatToken(token, userId, isDm);
 
+  useEffect(() => {
+    if (!focusRequest || !viewportRef.current) return;
+    const token = tokens.find((item) => item.id === focusRequest.id);
+    if (!token) return;
+    const viewport = viewportRef.current.getBoundingClientRect();
+    setPan({
+      x: viewport.width / 2 - (token.x + token.width_squares / 2) * cell * zoom,
+      y: viewport.height / 2 - (token.y + token.height_squares / 2) * cell * zoom,
+    });
+  }, [focusRequest?.nonce]);
+
   const beginTokenDrag = (event: React.PointerEvent, token: CombatToken) => {
     event.stopPropagation();
-    onSelect(token.id, event.shiftKey);
+    onSelect(token.id, targetMode || event.shiftKey);
     if (!canMove(token)) return;
     event.currentTarget.setPointerCapture(event.pointerId);
     setDrag({ token, pointerX: event.clientX, pointerY: event.clientY, x: token.x, y: token.y, distance: 0 });
@@ -123,6 +143,11 @@ export function MapBoard({
         <button onClick={() => setZoom((value) => Math.min(2.5, value + .1))} title="Zoom in"><Plus /></button>
         <button onClick={() => { setZoom(1); setPan({ x: 24, y: 24 }); }} title="Reset view"><RotateCcw /></button>
         <span className="combat-map-scale"><Crosshair /> {feet} ft / square</span>
+        <span className={targetMode ? 'target-mode active' : 'target-mode'}><Target /> {targetMode ? 'Targeting mode' : 'Select mode'}</span>
+        <span className="map-selection-summary" title={`Selected: ${selectedNames.join(', ') || 'none'}; Targets: ${targetNames.join(', ') || 'none'}`}>
+          Selected: {selectedNames.join(', ') || 'none'} · Targets: {targetNames.join(', ') || 'none'}
+        </span>
+        <span className="map-help" title="Click selects. Turn on targeting mode or hold Shift while clicking to add or remove targets. Drag a token you control to move it."><HelpCircle /></span>
         {drag && (
           <span className={parseSpeed(drag.token.state.speed) !== null && drag.distance > parseSpeed(drag.token.state.speed)! ? 'movement-warning' : 'movement-distance'}>
             {drag.distance} ft
@@ -134,7 +159,8 @@ export function MapBoard({
       </div>
       <div
         ref={viewportRef}
-        className="combat-map-viewport"
+        className={`combat-map-viewport ${targetMode ? 'targeting' : ''}`}
+        data-testid="combat-map-viewport"
         onWheel={(event) => {
           event.preventDefault();
           setZoom((value) => Math.max(.4, Math.min(2.5, value - event.deltaY * .001)));
@@ -174,18 +200,27 @@ export function MapBoard({
             const percent = Math.max(0, Math.min(100, (hp.current / Math.max(1, hp.max)) * 100));
             const selected = selectedIds.includes(token.id);
             const targeted = targetIds.includes(token.id);
+            const targetOrder = targetIds.indexOf(token.id) + 1;
             const current = activeId === token.id;
+            const acting = actorId === token.id;
+            const relationship = actor && token.id !== actor.id
+              ? token.team === actor.team ? 'ally' : 'enemy'
+              : '';
             const portrait = token.state.portraitUrl;
             const dead = token.state.dead || hp.current <= 0;
             return (
               <button
                 key={token.id}
                 data-token
+                data-testid={`map-token-${token.id}`}
+                aria-label={`${token.name}, ${acting ? 'acting combatant, ' : ''}${targeted ? `target ${targetOrder}, ` : ''}${hp.current} of ${hp.max} HP`}
                 className={[
                   'map-token',
                   selected ? 'selected' : '',
                   targeted ? 'targeted' : '',
+                  acting ? 'actor' : '',
                   current ? 'current-turn' : '',
+                  relationship,
                   dead ? 'dead' : '',
                   canMove(token) ? 'controllable' : '',
                 ].join(' ')}
@@ -210,6 +245,8 @@ export function MapBoard({
                 </span>
                 <span className="token-name">{token.name}</span>
                 <span className="token-hp"><i style={{ width: `${percent}%` }} /></span>
+                {targeted && <span className="token-target-order" aria-hidden="true">{targetOrder}</span>}
+                {acting && <span className="token-role-label">ACTOR</span>}
                 {hp.temp > 0 && <span className="token-temp">+{hp.temp}</span>}
                 {!!token.state.conditions?.length && <span className="token-conditions">{token.state.conditions.length}</span>}
                 {token.state.unconscious && <span className="token-state">UNCONSCIOUS</span>}

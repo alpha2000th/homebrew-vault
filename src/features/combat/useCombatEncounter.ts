@@ -27,7 +27,9 @@ export function useCombatEncounter(encounterId: string, userId: string) {
   stateRef.current = state;
 
   const reload = useCallback(async () => {
-    setLoading(true);
+    // Keep the combat workspace mounted during refreshes so the active tab,
+    // scroll position, actor, and target context are not reset after every save.
+    if (!stateRef.current.encounter) setLoading(true);
     try {
       const bundle = await loadEncounterBundle(encounterId);
       setMap(bundle.map);

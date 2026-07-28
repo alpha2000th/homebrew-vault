@@ -1,0 +1,153 @@
+{
+  "fixtureId": "combat-test-qa-titan",
+  "testData": true,
+  "schemaVersion": 2,
+  "name": "Combat QA Titan",
+  "icon": "QA",
+  "challengeRating": 30,
+  "type": "Synthetic Titan",
+  "size": "Gargantuan",
+  "speed": "50 ft",
+  "armorClass": 24,
+  "hp": { "current": 720, "max": 720, "temp": 40 },
+  "conditions": [],
+  "damageImmunities": ["Poison"],
+  "conditionImmunities": ["Charmed"],
+  "resourcePools": [
+    { "id": "qa-charge", "name": "QA Charges", "current": 5, "max": 5, "rechargeType": "round" },
+    { "id": "qa-legendary", "name": "Legendary Actions", "current": 3, "max": 3, "rechargeType": "round" }
+  ],
+  "legendaryActionsPerRound": 3,
+  "legendaryActionsUsed": 0,
+  "actions": [
+    {
+      "id": "qa-prismatic-cleaver",
+      "category": "action",
+      "name": "Prismatic Cleaver",
+      "cost": "1 action",
+      "description": "Structured schema-v2 attack with three independently editable damage components.",
+      "attackFormula": "1d20 + 18",
+      "damageFormulas": [
+        { "formula": "4d12 + 10", "type": "slashing" },
+        { "formula": "2d8", "type": "fire" },
+        { "formula": "1d6", "type": "radiant" }
+      ],
+      "range": "15 ft",
+      "targetType": "One creature",
+      "resourceCosts": [{ "resourceId": "qa-charge", "name": "QA Charges", "amount": 1 }],
+      "effects": [{ "kind": "condition", "condition": "Marked" }]
+    },
+    {
+      "id": "qa-gravity-wave",
+      "category": "action",
+      "name": "Gravity Wave",
+      "cost": "1 action",
+      "description": "Creatures in a 30-foot cone make a Strength saving throw. Outcomes remain editable per target.",
+      "saveAbility": "Strength",
+      "saveDc": 23,
+      "damageFormulas": [{ "formula": "12d10", "type": "force" }],
+      "range": "30 ft cone",
+      "targetType": "Creatures in area",
+      "area": { "shape": "cone", "x": 0, "y": 0, "width": 6, "height": 6, "rotation": 0 },
+      "effects": [{ "kind": "condition", "condition": "Prone" }]
+    },
+    {
+      "id": "qa-chain-verdict",
+      "category": "action",
+      "name": "Chain Verdict",
+      "cost": "1 action",
+      "description": "A multi-target attack that can affect any number of selected creatures.",
+      "attackFormula": "1d20 + 18",
+      "damageFormulas": [{ "formula": "6d10 + 8", "type": "lightning" }],
+      "range": "120 ft",
+      "targetType": "Multiple creatures"
+    },
+    {
+      "id": "qa-legacy-overload",
+      "category": "action",
+      "name": "Legacy Overload",
+      "cost": "1 action",
+      "description": "Legacy text only: make a +18 attack and deal 5d12 + 9 thunder damage on a hit. The detected formulas are editable and advisory."
+    },
+    {
+      "id": "qa-repair-pulse",
+      "category": "action",
+      "name": "Repair Pulse",
+      "cost": "1 action",
+      "description": "The titan or an ally regains hit points.",
+      "healingFormula": "6d12 + 20",
+      "range": "60 ft",
+      "targetType": "Self or one ally",
+      "effects": [{ "kind": "healing", "formula": "6d12 + 20" }]
+    },
+    {
+      "id": "qa-aegis-buffer",
+      "category": "bonus",
+      "name": "Aegis Buffer",
+      "cost": "1 bonus action",
+      "description": "Grant temporary hit points to one target.",
+      "healingFormula": "4d10 + 12",
+      "range": "30 ft",
+      "targetType": "Self or one ally",
+      "effects": [{ "kind": "temp_hp", "formula": "4d10 + 12" }]
+    },
+    {
+      "id": "qa-rapid-calibration",
+      "category": "bonus",
+      "name": "Rapid Calibration",
+      "cost": "1 bonus action",
+      "description": "Restore one QA Charge.",
+      "targetType": "Self",
+      "effects": [{ "kind": "resource", "resourceId": "qa-charge", "amount": 1 }]
+    },
+    {
+      "id": "qa-parry-vector",
+      "category": "reaction",
+      "name": "Parry Vector",
+      "cost": "1 reaction",
+      "description": "Recorded reaction to an attack. No validity recommendation is made.",
+      "targetType": "Self"
+    },
+    {
+      "id": "qa-reflective-shell",
+      "category": "reaction",
+      "name": "Reflective Shell",
+      "cost": "1 reaction",
+      "description": "Recorded reaction to damage or a spell. The player may select it for any broad trigger.",
+      "damageFormulas": [{ "formula": "3d10", "type": "force" }],
+      "targetType": "Triggering creature"
+    },
+    {
+      "id": "qa-legendary-step",
+      "category": "legendary",
+      "name": "Legendary Step",
+      "cost": "1 legendary action",
+      "description": "Move up to half speed without deciding opportunity-attack legality.",
+      "resourceCosts": [{ "resourceId": "qa-legendary", "name": "Legendary Actions", "amount": 1 }],
+      "targetType": "Self"
+    },
+    {
+      "id": "qa-lair-pulse",
+      "category": "lair",
+      "name": "Lair Diagnostic Pulse",
+      "cost": "Lair action",
+      "description": "All chosen creatures make a Constitution saving throw or become Slowed.",
+      "saveAbility": "Constitution",
+      "saveDc": 22,
+      "damageFormulas": [{ "formula": "4d8", "type": "psychic" }],
+      "targetType": "Multiple creatures",
+      "effects": [{ "kind": "condition", "condition": "Slowed" }]
+    }
+  ],
+  "homebrewPowers": [
+    {
+      "id": "qa-homebrew-null-field",
+      "name": "Null Field",
+      "activationCost": "2 QA Charges",
+      "description": "A homebrew multi-target field dealing 3d10 necrotic damage and applying Silenced.",
+      "formula": "3d10",
+      "range": "20 ft radius",
+      "targetType": "Creatures in area"
+    }
+  ]
+}

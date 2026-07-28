@@ -1,0 +1,161 @@
+{
+  "fixtureId": "combat-test-tarrasque",
+  "testData": true,
+  "schemaVersion": 2,
+  "name": "Tarrasque",
+  "icon": "TR",
+  "challengeRating": 30,
+  "type": "Titan",
+  "size": "Gargantuan",
+  "speed": "40 ft",
+  "armorClass": 25,
+  "hp": { "current": 676, "max": 676, "temp": 0 },
+  "conditions": [],
+  "conditionImmunities": ["Charmed", "Frightened", "Paralyzed", "Poisoned"],
+  "damageImmunities": ["Fire", "Poison", "Bludgeoning, Piercing, and Slashing from nonmagical attacks"],
+  "resourcePools": [
+    { "id": "legendary-resistance", "name": "Legendary Resistance", "current": 3, "max": 3, "rechargeType": "day" },
+    { "id": "legendary-actions", "name": "Legendary Actions", "current": 3, "max": 3, "rechargeType": "round" }
+  ],
+  "legendaryActionsPerRound": 3,
+  "legendaryActionsUsed": 0,
+  "actions": [
+    {
+      "id": "tarrasque-multiattack",
+      "category": "action",
+      "name": "Multiattack",
+      "cost": "1 action",
+      "description": "The tarrasque makes five attacks: one with its bite, two with its claws, one with its horns, and one with its tail. It can use Swallow instead of its bite.",
+      "range": "Varies",
+      "targetType": "Multiple creatures",
+      "effects": [{ "kind": "note", "amount": 5 }]
+    },
+    {
+      "id": "tarrasque-bite",
+      "category": "action",
+      "name": "Bite",
+      "cost": "1 action",
+      "description": "Melee Weapon Attack. On a hit the target takes piercing damage and is grappled.",
+      "attackFormula": "1d20 + 19",
+      "damageFormulas": [{ "formula": "4d12 + 10", "type": "piercing" }],
+      "range": "10 ft",
+      "targetType": "One target",
+      "effects": [{ "kind": "condition", "condition": "Grappled" }]
+    },
+    {
+      "id": "tarrasque-claw",
+      "category": "action",
+      "name": "Claw",
+      "cost": "1 action",
+      "description": "Melee Weapon Attack with a claw.",
+      "attackFormula": "1d20 + 19",
+      "damageFormulas": [{ "formula": "4d8 + 10", "type": "slashing" }],
+      "range": "15 ft",
+      "targetType": "One target"
+    },
+    {
+      "id": "tarrasque-horns",
+      "category": "action",
+      "name": "Horns",
+      "cost": "1 action",
+      "description": "Melee Weapon Attack with the tarrasque's horns.",
+      "attackFormula": "1d20 + 19",
+      "damageFormulas": [{ "formula": "4d10 + 10", "type": "piercing" }],
+      "range": "10 ft",
+      "targetType": "One target"
+    },
+    {
+      "id": "tarrasque-tail",
+      "category": "action",
+      "name": "Tail",
+      "cost": "1 action",
+      "description": "Melee Weapon Attack. A creature hit must succeed on a Strength save or fall prone.",
+      "attackFormula": "1d20 + 19",
+      "damageFormulas": [{ "formula": "4d6 + 10", "type": "bludgeoning" }],
+      "saveAbility": "Strength",
+      "saveDc": 20,
+      "range": "20 ft",
+      "targetType": "One target",
+      "effects": [{ "kind": "condition", "condition": "Prone" }]
+    },
+    {
+      "id": "tarrasque-frightful-presence",
+      "category": "action",
+      "name": "Frightful Presence",
+      "cost": "1 action",
+      "description": "Each creature of the tarrasque's choice within 120 feet makes a Wisdom saving throw. The application does not decide immunity or validity.",
+      "saveAbility": "Wisdom",
+      "saveDc": 17,
+      "range": "120 ft",
+      "targetType": "Any chosen creatures",
+      "effects": [{ "kind": "condition", "condition": "Frightened" }]
+    },
+    {
+      "id": "tarrasque-swallow",
+      "category": "action",
+      "name": "Swallow",
+      "cost": "Replaces Bite",
+      "description": "The tarrasque makes one bite attack against a grappled Large or smaller creature. On a hit, the target takes bite damage and is swallowed.",
+      "attackFormula": "1d20 + 19",
+      "damageFormulas": [
+        { "formula": "4d12 + 10", "type": "piercing" },
+        { "formula": "16d6", "type": "acid" }
+      ],
+      "range": "10 ft",
+      "targetType": "One grappled target",
+      "effects": [{ "kind": "condition", "condition": "Swallowed" }]
+    },
+    {
+      "id": "tarrasque-legendary-tail",
+      "category": "legendary",
+      "name": "Legendary Tail Attack",
+      "cost": "1 legendary action",
+      "description": "The tarrasque makes one tail attack.",
+      "attackFormula": "1d20 + 19",
+      "damageFormulas": [{ "formula": "4d6 + 10", "type": "bludgeoning" }],
+      "resourceCosts": [{ "resourceId": "legendary-actions", "name": "Legendary Actions", "amount": 1 }],
+      "range": "20 ft",
+      "targetType": "One target"
+    },
+    {
+      "id": "tarrasque-legendary-move",
+      "category": "legendary",
+      "name": "Legendary Move",
+      "cost": "1 legendary action",
+      "description": "The tarrasque moves up to half its speed.",
+      "resourceCosts": [{ "resourceId": "legendary-actions", "name": "Legendary Actions", "amount": 1 }],
+      "targetType": "Self"
+    },
+    {
+      "id": "tarrasque-legendary-chomp",
+      "category": "legendary",
+      "name": "Legendary Chomp",
+      "cost": "2 legendary actions",
+      "description": "The tarrasque makes one bite attack or uses Swallow.",
+      "attackFormula": "1d20 + 19",
+      "damageFormulas": [{ "formula": "4d12 + 10", "type": "piercing" }],
+      "resourceCosts": [{ "resourceId": "legendary-actions", "name": "Legendary Actions", "amount": 2 }],
+      "range": "10 ft",
+      "targetType": "One target"
+    },
+    {
+      "id": "tarrasque-legendary-resistance",
+      "category": "reaction",
+      "name": "Legendary Resistance",
+      "cost": "1 use",
+      "description": "If the tarrasque fails a saving throw, the player may propose that it succeeds instead. The DM decides the outcome.",
+      "resourceCosts": [{ "resourceId": "legendary-resistance", "name": "Legendary Resistance", "amount": 1 }],
+      "targetType": "Self"
+    }
+  ],
+  "homebrewPowers": [
+    {
+      "id": "tarrasque-test-temp-hp",
+      "name": "QA Carapace Reserve",
+      "activationCost": "Test-only power",
+      "description": "Grants temporary HP to exercise temporary-HP absorption and undo.",
+      "formula": "4d10 + 20",
+      "targetType": "Self"
+    }
+  ]
+}
